@@ -1,21 +1,66 @@
 import { useState } from 'react'
 import { useMeshSocket } from './useMeshSocket'
+import { ChatRoom } from './components/ChatRoom'
 
 // Stable session UID for this app instance
 const SESSION_UID = crypto.randomUUID()
 
 export default function App() {
+  // Connection state
+  const [session, setSession]   = useState(null)   // null | { uid, nick, isHost, roomCode, roomName }
+  const [messages, setMessages] = useState([])     // { type, uid, nick, msg, msg_id, isMine }[]
+  const [users, setUsers]       = useState([])     // { uid, nick, is_host, status }[]
+
+  // Dashboard form state
   const [hostForm, setHostForm] = useState({ name: '', port: '8765', password: '' })
   const [joinForm, setJoinForm] = useState({ ip: '', port: '8765', password: '' })
-  const [status, setStatus]     = useState(null)   // null | 'host' | 'client'
-  const [roomInfo, setRoomInfo] = useState(null)   // { code, room_name }
   const [log, setLog]           = useState([])
 
-  const { connect } = useMeshSocket()
+  const socket = useMeshSocket()
 
   function addLog(msg) {
     console.log('[MESH UI]', msg)
     setLog((prev) => [...prev.slice(-9), msg])
+  }
+
+  // --- Single message router — handles ALL WS message types ---
+  // Called by useMeshSocket for every incoming message.
+  // `nick` and `isHost` are captured in the closure per-connection.
+  function makeMessageHandler(nick, isHost) {
+    return function handleMessage(msg) {
+      switch (msg.type) {
+        case 'accepted':
+          setSession({ uid: SESSION_UID, nick, isHost, roomCode: msg.room_code, roomName: msg.room_name })
+          addLog(`Connected — ${msg.room_name} (${msg.room_code})`)
+          console.log('[MESH UI] accepted payload:', msg)
+          break
+
+        case 'user_list':
+          setUsers(msg.users)
+          break
+
+        case 'chat':
+          setMessages((prev) => [...prev, { ...msg, isMine: false }])
+          // Update nick for peers who joined after us (we only had their uid)
+          setUsers((prev) => prev.map((u) => u.uid === msg.uid ? { ...u, nick: msg.nick } : u))
+          break
+
+        case 'mesh_peer_joined':
+          // We only receive uid + ip here — nick is unknown until they send a chat
+          setUsers((prev) => {
+            if (prev.find((u) => u.uid === msg.uid)) return prev
+            return [...prev, { uid: msg.uid, nick: `peer-${msg.uid.slice(0, 6)}`, is_host: false, status: 'online' }]
+          })
+          break
+
+        case 'mesh_peer_left':
+          setUsers((prev) => prev.filter((u) => u.uid !== msg.uid))
+          break
+
+        default:
+          console.log('[MESH UI] unhandled message type:', msg.type)
+      }
+    }
   }
 
   // --- Hosting a Room — core-flows.md ---
@@ -31,19 +76,9 @@ export default function App() {
     if (result.error) { addLog(`Error: ${result.error}`); return }
     addLog(`Server started — ${result.ws_url}`)
 
-    // Host's own frontend connects to the server it just started (core-flows.md)
-    const joinPayload = {
-      type: 'join', uid: SESSION_UID, nick: name,
-      password, dp: '', bio: '',
-    }
-    connect(result.ws_url, joinPayload, (msg) => {
-      if (msg.type === 'accepted') {
-        setStatus('host')
-        setRoomInfo({ code: msg.room_code, room_name: msg.room_name })
-        addLog(`Connected as Host — ${msg.room_name} (${msg.room_code})`)
-        console.log('[MESH UI] accepted payload:', msg)
-      }
-    })
+    const nick = name
+    const joinPayload = { type: 'join', uid: SESSION_UID, nick, password, dp: '', bio: '' }
+    socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, true))
   }
 
   // --- Joining a Room — core-flows.md ---
@@ -51,27 +86,45 @@ export default function App() {
     const { ip, port, password } = joinForm
     if (!ip || !port) { addLog('IP and Port are required.'); return }
 
-    addLog(`Requesting ws_url for ${ip}:${port}...`)
+    addLog(`Connecting to ${ip}:${port}...`)
     const result = await window.meshBridge.startClient({ ip, port: Number(port), password })
 
     if (!result.ws_url) { addLog('Error: no ws_url returned'); return }
-    addLog(`Connecting to ${result.ws_url}...`)
 
-    const joinPayload = {
-      type: 'join', uid: SESSION_UID, nick: 'Guest',
-      password, dp: '', bio: '',
-    }
-    connect(result.ws_url, joinPayload, (msg) => {
-      if (msg.type === 'accepted') {
-        setStatus('client')
-        setRoomInfo({ code: msg.room_code, room_name: msg.room_name })
-        addLog(`Connected to Room — ${msg.room_name} (${msg.room_code})`)
-        console.log('[MESH UI] accepted payload:', msg)
-      }
-      if (msg.type === 'rejected') {
-        addLog(`Rejected: ${msg.reason}`)
-      }
-    })
+    const nick = 'Guest'
+    const joinPayload = { type: 'join', uid: SESSION_UID, nick, password, dp: '', bio: '' }
+    socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, false))
+  }
+
+  // --- Chat actions passed to ChatRoom ---
+  function handleSendChat(text) {
+    if (!text.trim() || !session) return
+    // msg_id: 8-char base36 timestamp — from network-schemas.md
+    const msg_id = Date.now().toString(36).slice(-8).toUpperCase()
+    const payload = { type: 'chat', uid: session.uid, nick: session.nick, msg: text.trim(), msg_id }
+    socket.sendMessage(payload)
+    // Optimistic add: server excludes sender from broadcast, so we add it ourselves
+    setMessages((prev) => [...prev, { ...payload, isMine: true }])
+  }
+
+  function handleLeave() {
+    socket.disconnect()
+    setSession(null)
+    setMessages([])
+    setUsers([])
+  }
+
+  // --- Render: ChatRoom or Dashboard ---
+  if (session) {
+    return (
+      <ChatRoom
+        session={session}
+        messages={messages}
+        users={users}
+        onSendChat={handleSendChat}
+        onLeave={handleLeave}
+      />
+    )
   }
 
   return (
@@ -86,22 +139,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── Status Banner ── */}
-      {status && (
-        <div className="mx-6 mt-4 bg-emerald-950 border border-emerald-700 text-emerald-400 rounded-lg px-4 py-2 text-sm flex items-center gap-2 shrink-0">
-          <span className="text-emerald-500">✓</span>
-          <span>
-            {status === 'host' ? 'Connected as Host' : 'Connected to Room'}
-            {roomInfo && ` — ${roomInfo.room_name} `}
-            {roomInfo && (
-              <span className="font-mono bg-emerald-900/50 px-1.5 py-0.5 rounded text-xs">
-                {roomInfo.code}
-              </span>
-            )}
-          </span>
-        </div>
-      )}
-
       {/* ── Main Cards ── */}
       <main className="flex-1 flex gap-4 p-6 items-start">
 
@@ -111,7 +148,6 @@ export default function App() {
             <h2 className="text-base font-semibold text-zinc-100">Host a Room</h2>
             <p className="text-zinc-500 text-xs mt-0.5">Start a local WebSocket server on this machine.</p>
           </div>
-
           <div className="flex flex-col gap-3">
             <input
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-blue-500 transition-colors"
@@ -134,13 +170,11 @@ export default function App() {
               onChange={(e) => setHostForm((f) => ({ ...f, password: e.target.value }))}
             />
           </div>
-
           <button
             onClick={handleStartRoom}
-            disabled={status === 'host'}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer disabled:cursor-not-allowed"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer"
           >
-            {status === 'host' ? 'Room Active' : 'Start Room'}
+            Start Room
           </button>
         </section>
 
@@ -150,7 +184,6 @@ export default function App() {
             <h2 className="text-base font-semibold text-zinc-100">Join a Room</h2>
             <p className="text-zinc-500 text-xs mt-0.5">Connect to an existing room on the LAN.</p>
           </div>
-
           <div className="flex flex-col gap-3">
             <input
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-blue-500 transition-colors"
@@ -173,13 +206,11 @@ export default function App() {
               onChange={(e) => setJoinForm((f) => ({ ...f, password: e.target.value }))}
             />
           </div>
-
           <button
             onClick={handleJoinRoom}
-            disabled={status === 'client'}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer disabled:cursor-not-allowed"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer"
           >
-            {status === 'client' ? 'Joined' : 'Join Room'}
+            Join Room
           </button>
         </section>
 
