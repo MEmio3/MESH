@@ -39,10 +39,9 @@ ipcMain.handle('py_start_host', async (_event, args) => {
   }
 })
 
-ipcMain.handle('py_start_client', async (_event, args) => {
-  // TODO: Validate target, return ws_url for renderer to connect
-  console.log('[STUB] py_start_client:', args)
-  return { ws_url: null }
+// core-flows.md: "Joining a Room" — backend returns ws_url; UI opens the connection
+ipcMain.handle('py_start_client', async (_event, { ip, port }) => {
+  return { ws_url: `ws://${ip}:${port}` }
 })
 
 app.whenReady().then(() => {

@@ -24,6 +24,16 @@ function broadcast(serverState, obj, excludeWs) {
   }
 }
 
+// broadcastAll: covers connected_peers AND guest_peers (required for chat)
+function broadcastAll(serverState, obj, excludeWs) {
+  for (const peer of serverState.connected_peers.values()) {
+    if (peer.ws !== excludeWs) send(peer.ws, obj)
+  }
+  for (const peer of serverState.guest_peers.values()) {
+    if (peer.ws !== excludeWs) send(peer.ws, obj)
+  }
+}
+
 // --- Core Handlers ---
 
 function handleClose(ws, serverState) {
@@ -115,7 +125,31 @@ function handleMessage(data, ws, serverState) {
     return
   }
 
-  // Additional message types (chat, relay, etc.) will be added in later steps.
+  if (payload.type === MSG_TYPES.CHAT) {
+    // Only registered peers may broadcast chat
+    if (!serverState.connected_peers.has(ws._mesh_uid)) return
+
+    // Append to history — trim to DEFAULTS.HISTORY_LIMIT
+    // History shape from state-models.md
+    serverState.history.push({
+      uid:       payload.uid,
+      nick:      payload.nick,
+      msg:       payload.msg,
+      msg_id:    payload.msg_id,
+      reactions: [],
+      seen_by:   [],
+    })
+    if (serverState.history.length > DEFAULTS.HISTORY_LIMIT) {
+      serverState.history.shift()
+    }
+
+    // Broadcast exact payload to all peers (connected + guest), excluding sender
+    broadcastAll(serverState, payload, ws)
+    console.log(`[MESH] Chat from ${payload.nick}: ${payload.msg}`)
+    return
+  }
+
+  // Additional message types (relay, etc.) will be added in later steps.
   console.log(`[MESH] Unhandled message type: ${payload.type}`)
 }
 
