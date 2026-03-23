@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root {
+  --color-mesh-bg: #09090b;
+  --color-mesh-accent: #3b82f6;
+}
+
+body {
+  background-color: var(--color-mesh-bg);
+  color: #f4f4f5;
+  font-family: 'Inter', system-ui, sans-serif;
+  margin: 0;
+}
