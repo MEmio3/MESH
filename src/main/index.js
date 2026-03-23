@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
+const network = require('./network')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -30,10 +31,12 @@ function createWindow() {
 // Full WS server implementation goes here in Phase 1.
 
 ipcMain.handle('py_start_host', async (_event, args) => {
-  // TODO: Instantiate ws.Server on args.port, register in active_servers,
-  //       return { code, history, ws_url }
-  console.log('[STUB] py_start_host:', args)
-  return { code: null, history: [], ws_url: null }
+  try {
+    return network.startHost(args)
+  } catch (err) {
+    console.error('[MESH] py_start_host error:', err.message)
+    return { error: err.message }
+  }
 })
 
 ipcMain.handle('py_start_client', async (_event, args) => {
