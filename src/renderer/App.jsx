@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMeshSocket } from './useMeshSocket'
 import { ChatRoom } from './components/ChatRoom'
+import { RelayActive } from './components/RelayActive'
 
 // Stable session UID for this app instance
 const SESSION_UID = crypto.randomUUID()
@@ -10,6 +11,7 @@ export default function App() {
   const [session, setSession]   = useState(null)   // null | { uid, nick, isHost, roomCode, roomName }
   const [messages, setMessages] = useState([])     // { type, uid, nick, msg, msg_id, isMine }[]
   const [users, setUsers]       = useState([])     // { uid, nick, is_host, status }[]
+  const [relay, setRelay]       = useState(null)   // null | { port, roomCode, name }
 
   // Dashboard form state
   const [hostForm, setHostForm] = useState({ name: '', port: '8765', password: '' })
@@ -114,7 +116,30 @@ export default function App() {
     setUsers([])
   }
 
-  // --- Render: ChatRoom or Dashboard ---
+  // --- Headless Relay ---
+  async function handleStartRelay() {
+    const { name, port, password } = hostForm
+    if (!name || !port) { addLog('Name and Port are required.'); return }
+
+    const result = await window.meshBridge.startHost({
+      name, port: Number(port), password, headless_relay: true,
+    })
+    if (result.error) { addLog(`Error: ${result.error}`); return }
+    setRelay({ port: Number(port), roomCode: result.code, name })
+    addLog(`Relay started — port ${port} (${result.code})`)
+  }
+
+  async function handleStopRelay() {
+    if (!relay) return
+    await window.meshBridge.stopRelay({ port: relay.port })
+    setRelay(null)
+  }
+
+  // --- Render: RelayActive | ChatRoom | Dashboard ---
+  if (relay) {
+    return <RelayActive relay={relay} onStop={handleStopRelay} />
+  }
+
   if (session) {
     return (
       <ChatRoom
@@ -170,12 +195,21 @@ export default function App() {
               onChange={(e) => setHostForm((f) => ({ ...f, password: e.target.value }))}
             />
           </div>
-          <button
-            onClick={handleStartRoom}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer"
-          >
-            Start Room
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleStartRoom}
+              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer"
+            >
+              Start Room
+            </button>
+            <button
+              onClick={handleStartRelay}
+              className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 font-semibold rounded-lg py-2 text-sm transition-colors cursor-pointer"
+              title="Start a headless relay — no chat UI, routes direct messages only"
+            >
+              Start as Relay
+            </button>
+          </div>
         </section>
 
         {/* Join a Room */}

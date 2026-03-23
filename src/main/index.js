@@ -44,6 +44,16 @@ ipcMain.handle('py_start_client', async (_event, { ip, port }) => {
   return { ws_url: `ws://${ip}:${port}` }
 })
 
+ipcMain.handle('py_stop_relay', async (_event, { port }) => {
+  try {
+    network.stopHost(port)
+    return { ok: true }
+  } catch (err) {
+    console.error('[MESH] py_stop_relay error:', err.message)
+    return { error: err.message }
+  }
+})
+
 app.whenReady().then(() => {
   createWindow()
   app.on('activate', () => {

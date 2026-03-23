@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('meshBridge', {
    */
   startClient: (args) => ipcRenderer.invoke('py_start_client', args),
 
+  /**
+   * Stop a running headless relay server.
+   * @param {{ port: number }} args
+   * @returns {Promise<{ ok: boolean } | { error: string }>}
+   */
+  stopRelay: (args) => ipcRenderer.invoke('py_stop_relay', args),
+
   // --- Main -> Renderer (on = event listener) ---
 
   /**
