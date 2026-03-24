@@ -56,8 +56,9 @@ export function ChatRoom({ session, messages, users, onSendChat, onLeave }) {
         )}
         <button
           onClick={onLeave}
-          className="ml-auto text-xs text-gray-500 hover:text-zinc-300 border-2 border-gray-800 hover:border-gray-600 px-3 py-1 rounded-none transition-colors cursor-pointer"
+          className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 hover:text-zinc-300 border-2 border-gray-800 hover:border-gray-600 px-3 py-1 rounded-none transition-colors cursor-pointer"
         >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           Leave
         </button>
       </header>
@@ -126,6 +127,49 @@ export function ChatRoom({ session, messages, users, onSendChat, onLeave }) {
 
 // ── Sub-components ──
 
+function MediaAttachment({ media }) {
+  if (!media) return null
+  if (media.type === 'image' && media.data) {
+    return (
+      <div className="mt-1.5 rounded overflow-hidden max-w-[280px]">
+        <img src={media.data} alt={media.filename || 'image'} className="w-full h-auto" />
+        {media.filename && <span className="text-[9px] text-gray-500 font-mono block mt-0.5">{media.filename}</span>}
+      </div>
+    )
+  }
+  if (media.type === 'file' && media.filename) {
+    return (
+      <div className="mt-1.5 flex items-center gap-2 bg-[#0d0f13] border border-gray-800 rounded px-2.5 py-1.5">
+        <svg className="w-4 h-4 text-[#107C10] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span className="text-xs text-zinc-300 font-mono truncate">{media.filename}</span>
+      </div>
+    )
+  }
+  return null
+}
+
+function Reactions({ reactions }) {
+  if (!reactions || typeof reactions !== 'object') return null
+  const entries = Object.entries(reactions)
+  if (entries.length === 0) return null
+
+  // Group by emoji → count
+  const counts = {}
+  for (const [, emoji] of entries) {
+    counts[emoji] = (counts[emoji] || 0) + 1
+  }
+
+  return (
+    <div className="flex gap-1 mt-1 px-0.5">
+      {Object.entries(counts).map(([emoji, count]) => (
+        <span key={emoji} className="text-[11px] bg-[#181c23] border border-gray-800 rounded px-1.5 py-0.5">
+          {emoji}{count > 1 && <span className="text-gray-500 ml-0.5 text-[10px]">{count}</span>}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function MessageBubble({ msg, session }) {
   const isMine = msg.isMine
 
@@ -135,7 +179,9 @@ function MessageBubble({ msg, session }) {
         <div className="max-w-[70%] flex flex-col items-end gap-0.5">
           <div className="bg-[#107C10] text-white text-sm px-3.5 py-2 rounded-none leading-relaxed">
             {msg.msg}
+            <MediaAttachment media={msg.media} />
           </div>
+          <Reactions reactions={msg.reactions} />
           <span className="text-[10px] text-gray-600 px-1 font-mono">
             {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
@@ -150,7 +196,9 @@ function MessageBubble({ msg, session }) {
         <span className="text-[11px] font-semibold text-[#107C10] px-1 uppercase tracking-widest">{msg.nick}</span>
         <div className="bg-[#13161b] text-zinc-100 text-sm px-3.5 py-2 rounded-none leading-relaxed border border-gray-800">
           {msg.msg}
+          <MediaAttachment media={msg.media} />
         </div>
+        <Reactions reactions={msg.reactions} />
         <span className="text-[10px] text-gray-600 px-1 font-mono">
           {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </span>

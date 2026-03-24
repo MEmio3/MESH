@@ -18,6 +18,7 @@ export default function App() {
   const [hostForm, setHostForm] = useState({ name: '', port: '8765', password: '' })
   const [joinForm, setJoinForm] = useState({ ip: '', port: '8765', password: '' })
   const [log, setLog]           = useState([])
+  const [editingProfile, setEditingProfile] = useState(false)
 
   const socket = useMeshSocket()
 
@@ -39,6 +40,8 @@ export default function App() {
       nick: h.nick,
       msg: h.msg,
       msg_id: h.msg_id,
+      media: h.media ?? null,
+      reactions: h.reactions ?? {},
       isMine: h.uid === myUid,
     }))
   }
@@ -244,12 +247,24 @@ export default function App() {
     )
   }
 
-  // 3. Active relay view
+  // 3. Editing profile
+  if (editingProfile) {
+    return (
+      <SetupProfile
+        uid={config.uid}
+        existingConfig={config}
+        onComplete={(updatedConfig) => { setConfig(updatedConfig); setEditingProfile(false) }}
+        onCancel={() => setEditingProfile(false)}
+      />
+    )
+  }
+
+  // 4. Active relay view
   if (relay) {
     return <RelayActive relay={relay} onStop={handleStopRelay} />
   }
 
-  // 4. In a chat room
+  // 5. In a chat room
   if (session) {
     return (
       <ChatRoom
@@ -262,7 +277,7 @@ export default function App() {
     )
   }
 
-  // ── 5. Dashboard ──────────────────────────────────────────────────────────
+  // ── 6. Dashboard ──────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-[#060608] text-[#e8f5e9] flex flex-col select-none relative">
@@ -288,12 +303,25 @@ export default function App() {
             style={{ boxShadow: '0 0 8px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }}
           />
 
-          <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs text-[#e8f5e9] tracking-wide">{config.nickname}</span>
-            <span className="font-mono text-[10px] text-[#3a5040] tracking-wide" title={config.uid}>
-              {config.uid.slice(0, 8)}…
-            </span>
-          </div>
+          <button
+            onClick={() => setEditingProfile(true)}
+            className="ml-auto flex items-center gap-2.5 cursor-pointer group bg-transparent border-none p-0"
+            title="Edit profile"
+          >
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="text-xs text-[#e8f5e9] tracking-wide group-hover:text-[#107C10] transition-colors">{config.nickname}</span>
+              <span className="font-mono text-[10px] text-[#3a5040] tracking-wide">
+                {config.uid.slice(0, 8)}…
+              </span>
+            </div>
+            <div className="w-8 h-8 rounded-full border border-[rgba(16,124,16,0.38)] bg-[#0d0f13] overflow-hidden shrink-0 group-hover:border-[#107C10] group-hover:shadow-[0_0_12px_rgba(16,124,16,0.25)] transition-all">
+              {config.dp_dataurl ? (
+                <img src={config.dp_dataurl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <svg className="w-full h-full p-1.5 text-[#3a5040]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              )}
+            </div>
+          </button>
         </header>
 
         {/* ── 2-Column Grid ── */}
@@ -350,15 +378,17 @@ export default function App() {
               <div className="flex gap-3 pt-5">
                 <button
                   onClick={handleStartRoom}
-                  className="flex-1 bg-[#107C10] hover:bg-[#1a9f1a] text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_20px_rgba(16,124,16,0.25)] hover:shadow-[0_0_32px_rgba(16,124,16,0.45)] hover:-translate-y-0.5 active:translate-y-0"
+                  className="flex-1 flex items-center justify-center gap-2 bg-[#107C10] hover:bg-[#1a9f1a] text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_20px_rgba(16,124,16,0.25)] hover:shadow-[0_0_32px_rgba(16,124,16,0.45)] hover:-translate-y-0.5 active:translate-y-0"
                 >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   Start Room
                 </button>
                 <button
                   onClick={handleStartRelay}
-                  className="flex-1 border border-[#107C10] text-[#107C10] bg-transparent hover:bg-[rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)] text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
+                  className="flex-1 flex items-center justify-center gap-2 border border-[#107C10] text-[#107C10] bg-transparent hover:bg-[rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)] text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
                   title="Start a headless relay — routes direct messages only"
                 >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                   Start as Relay
                 </button>
               </div>
@@ -411,7 +441,7 @@ export default function App() {
                 onClick={handleJoinRoom}
                 className="w-full mt-5 flex items-center justify-center gap-2.5 border border-[#107C10] bg-[rgba(16,124,16,0.05)] hover:bg-[rgba(16,124,16,0.12)] hover:border-[rgba(16,124,16,0.6)] text-[#107C10] text-[11px] font-bold tracking-[0.18em] uppercase px-4 py-3 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)]"
               >
-                <span className="text-sm leading-none">→</span>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
                 Request Access
               </button>
             </div>

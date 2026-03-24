@@ -5,6 +5,7 @@
 const { WebSocketServer } = require('ws')
 const { MSG_TYPES, DEFAULTS } = require('../shared/constants')
 const config = require('./config')
+const { encrypt, decrypt } = require('./crypto')
 const fs = require('fs')
 const path = require('path')
 
@@ -18,20 +19,28 @@ function ensureLogsDir() {
 function saveHistory(serverState) {
   ensureLogsDir()
   const filePath = path.join(LOGS_DIR, `room_${serverState.room_code}.json`)
-  fs.writeFileSync(filePath, JSON.stringify(serverState.history, null, 2))
+  const uid = config.getConfig().uid
+  const encrypted = encrypt(serverState.history, uid)
+  fs.writeFileSync(filePath, encrypted)
 }
 
 /**
  * Load persisted history for a room_code from disk (if it exists).
+ * Decrypts using the host's UID. Falls back to plain JSON for legacy logs.
  * @param {string} roomCode
  * @returns {Array}
  */
 function loadHistory(roomCode) {
   const filePath = path.join(LOGS_DIR, `room_${roomCode}.json`)
   if (fs.existsSync(filePath)) {
+    const raw = fs.readFileSync(filePath, 'utf-8')
+    const uid = config.getConfig().uid
     try {
-      return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-    } catch { return [] }
+      return decrypt(raw, uid)
+    } catch {
+      // Fallback: try parsing as legacy plain JSON
+      try { return JSON.parse(raw) } catch { return [] }
+    }
   }
   return []
 }
@@ -171,7 +180,8 @@ function handleMessage(data, ws, serverState) {
       nick:      payload.nick,
       msg:       payload.msg,
       msg_id:    payload.msg_id,
-      reactions: [],
+      media:     payload.media ?? null,
+      reactions: {},
       seen_by:   [],
     })
     if (serverState.history.length > DEFAULTS.HISTORY_LIMIT) {

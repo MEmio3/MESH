@@ -1,13 +1,15 @@
-// SetupProfile.jsx — First-boot profile creation screen
-// Shown when config.nickname is empty. User sets nickname, optional bio/dp.
-// Props: { uid, onComplete: (config) => void }
+// SetupProfile.jsx — Profile creation / editing screen
+// First boot: config.nickname is empty → create mode.
+// Edit mode: pass existing config to pre-fill fields.
+// Props: { uid, onComplete: (config) => void, existingConfig?: object, onCancel?: () => void }
 
 import { useState, useRef } from 'react'
 
-export function SetupProfile({ uid, onComplete }) {
-  const [nickname, setNickname] = useState('')
-  const [bio, setBio]           = useState('')
-  const [dpDataurl, setDpDataurl] = useState('')
+export function SetupProfile({ uid, onComplete, existingConfig, onCancel }) {
+  const isEdit = !!existingConfig
+  const [nickname, setNickname] = useState(existingConfig?.nickname ?? '')
+  const [bio, setBio]           = useState(existingConfig?.bio ?? '')
+  const [dpDataurl, setDpDataurl] = useState(existingConfig?.dp_dataurl ?? '')
   const [saving, setSaving]     = useState(false)
   const fileRef = useRef(null)
 
@@ -56,10 +58,10 @@ export function SetupProfile({ uid, onComplete }) {
               MESH
             </span>
             <h1 className="text-lg font-bold tracking-[0.12em] uppercase text-[#e8f5e9] mb-1.5">
-              Create Your Profile
+              {isEdit ? 'Edit Profile' : 'Create Your Profile'}
             </h1>
             <p className="text-[11px] text-[#7a9e82]">
-              Your identity on the mesh network. Your UID is permanent.
+              {isEdit ? 'Update your display name, bio, or avatar.' : 'Your identity on the mesh network. Your UID is permanent.'}
             </p>
           </div>
 
@@ -122,14 +124,25 @@ export function SetupProfile({ uid, onComplete }) {
             />
           </div>
 
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={!nickname.trim() || saving}
-            className="w-full bg-[#107C10] hover:bg-[#1a9f1a] disabled:bg-[#0a4f0a] disabled:cursor-not-allowed text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-3 rounded cursor-pointer transition-all duration-200 shadow-[0_0_20px_rgba(16,124,16,0.25)] hover:shadow-[0_0_32px_rgba(16,124,16,0.45)]"
-          >
-            {saving ? 'Saving...' : 'Enter the Mesh'}
-          </button>
+          {/* Submit + Cancel */}
+          <div className="flex gap-3">
+            {isEdit && onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 border border-[rgba(16,124,16,0.3)] text-[#7a9e82] hover:bg-[rgba(16,124,16,0.08)] text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-3 rounded cursor-pointer transition-all duration-200"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={!nickname.trim() || saving}
+              className="flex-1 bg-[#107C10] hover:bg-[#1a9f1a] disabled:bg-[#0a4f0a] disabled:cursor-not-allowed text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-3 rounded cursor-pointer transition-all duration-200 shadow-[0_0_20px_rgba(16,124,16,0.25)] hover:shadow-[0_0_32px_rgba(16,124,16,0.45)]"
+            >
+              {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Enter the Mesh'}
+            </button>
+          </div>
         </form>
 
       </div>

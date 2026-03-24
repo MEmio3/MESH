@@ -12,12 +12,16 @@ function makeJoinPayload({ uid, nick, password = '', dp = '', bio = '' }) {
 }
 
 /**
- * Chat broadcast payload.
- * @param {{ uid: string, nick: string, msg: string, msg_id: string }} args
- * @returns {{ type: string, uid: string, nick: string, msg: string, msg_id: string }}
+ * Chat broadcast payload — supports optional media attachment and reactions.
+ *
+ * media (optional): { type: 'image'|'file', data: 'base64_string', filename: 'string' }
+ * reactions (server-side): { [uid]: emoji_string } — e.g. { 'abc123': '👍', 'def456': '🔥' }
+ *
+ * @param {{ uid: string, nick: string, msg: string, msg_id: string, media?: object }} args
+ * @returns {{ type: string, uid: string, nick: string, msg: string, msg_id: string, media: object|null }}
  */
-function makeChatPayload({ uid, nick, msg, msg_id }) {
-  return { type: 'chat', uid, nick, msg, msg_id }
+function makeChatPayload({ uid, nick, msg, msg_id, media = null }) {
+  return { type: 'chat', uid, nick, msg, msg_id, media }
 }
 
 /**
