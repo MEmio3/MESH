@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMeshSocket } from './useMeshSocket'
 import { ChatRoom } from './components/ChatRoom'
 import { RelayActive } from './components/RelayActive'
@@ -127,6 +127,41 @@ export default function App() {
     if (!relay) return
     await window.meshBridge.stopRelay({ port: relay.port })
     setRelay(null)
+  }
+
+  // --- Active Servers polling ---
+  const [activeServers, setActiveServers] = useState([])
+
+  useEffect(() => {
+    let mounted = true
+    async function poll() {
+      const servers = await window.meshBridge.getRunningServers()
+      if (mounted) setActiveServers(servers)
+    }
+    poll()
+    const interval = setInterval(poll, 3000)
+    return () => { mounted = false; clearInterval(interval) }
+  }, [session, relay]) // re-subscribe when view changes
+
+  // --- Host re-enters an already-running room ---
+  async function handleReenterRoom(port) {
+    const result = await window.meshBridge.reenterRoom({ port })
+    if (result.error) { addLog(`Error: ${result.error}`); return }
+
+    addLog(`Re-entering room on port ${port}...`)
+    const nick = hostForm.name || 'Host'
+    const joinPayload = { type: 'join', uid: SESSION_UID, nick, password: '', dp: '', bio: '' }
+    socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, true))
+  }
+
+  // --- Shutdown a server from the Active Servers panel ---
+  async function handleShutdownServer(port) {
+    const result = await window.meshBridge.shutdownPort({ port })
+    if (result.error) { addLog(`Error: ${result.error}`); return }
+    addLog(`Server on port ${port} shut down.`)
+    // Immediately refresh the list
+    const servers = await window.meshBridge.getRunningServers()
+    setActiveServers(servers)
   }
 
   // --- Render: RelayActive | ChatRoom | Dashboard ---
@@ -309,7 +344,48 @@ export default function App() {
                 <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Active Servers</span>
                 <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
               </div>
-              <p className="text-xs text-[#3a5040] text-center py-3">No servers running.</p>
+
+              {activeServers.length === 0 ? (
+                <p className="text-xs text-[#3a5040] text-center py-3">No servers running.</p>
+              ) : (
+                <div className="flex flex-col gap-2.5">
+                  {activeServers.map((srv) => (
+                    <div key={srv.port} className="bg-[#181c23] border border-[rgba(16,124,16,0.14)] rounded px-3.5 py-3 flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2 h-2 rounded-full bg-[#107C10] shrink-0"
+                          style={{ boxShadow: '0 0 6px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }}
+                        />
+                        <span className="text-xs font-bold tracking-wide text-[#e8f5e9] truncate flex-1">{srv.name}</span>
+                        {srv.isRelay && (
+                          <span className="text-[9px] tracking-[0.15em] uppercase text-[#7a9e82] border border-[rgba(16,124,16,0.3)] px-1.5 py-0.5 rounded">relay</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-[#7a9e82] font-mono">
+                        <span>:{srv.port}</span>
+                        <span>{srv.code}</span>
+                        <span>{srv.peerCount} peer{srv.peerCount !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        {!srv.isRelay && (
+                          <button
+                            onClick={() => handleReenterRoom(srv.port)}
+                            className="flex-1 text-[10px] font-bold tracking-[0.12em] uppercase bg-[#107C10] hover:bg-[#1a9f1a] text-white py-1.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.2)] hover:shadow-[0_0_20px_rgba(16,124,16,0.4)]"
+                          >
+                            Re-Join
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleShutdownServer(srv.port)}
+                          className="flex-1 text-[10px] font-bold tracking-[0.12em] uppercase border border-red-800/60 text-red-400 hover:bg-red-900/20 hover:border-red-700 py-1.5 rounded cursor-pointer transition-all duration-200"
+                        >
+                          Shutdown
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ACTIVITY LOG */}

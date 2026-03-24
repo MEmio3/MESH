@@ -53,6 +53,31 @@ ipcMain.handle('py_stop_relay', async (_event, { port }) => {
   }
 })
 
+// Phase 1.5: Host Controls & Persistence
+
+ipcMain.handle('py_get_running_servers', async () => {
+  return network.getActiveServers()
+})
+
+ipcMain.handle('py_shutdown_port', async (_event, { port }) => {
+  try {
+    network.shutdownServer(port)
+    return { ok: true }
+  } catch (err) {
+    console.error('[MESH] py_shutdown_port error:', err.message)
+    return { error: err.message }
+  }
+})
+
+ipcMain.handle('py_reenter_room', async (_event, { port }) => {
+  try {
+    return network.reenterRoom(port)
+  } catch (err) {
+    console.error('[MESH] py_reenter_room error:', err.message)
+    return { error: err.message }
+  }
+})
+
 app.whenReady().then(() => {
   createWindow()
   app.on('activate', () => {

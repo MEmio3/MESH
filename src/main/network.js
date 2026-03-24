@@ -4,6 +4,21 @@
 
 const { WebSocketServer } = require('ws')
 const { MSG_TYPES, DEFAULTS } = require('../shared/constants')
+const fs = require('fs')
+const path = require('path')
+
+// --- Chat Log Persistence ---
+const LOGS_DIR = path.join(__dirname, '..', '..', 'logs')
+
+function ensureLogsDir() {
+  if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true })
+}
+
+function saveHistory(serverState) {
+  ensureLogsDir()
+  const filePath = path.join(LOGS_DIR, `room_${serverState.port}.json`)
+  fs.writeFileSync(filePath, JSON.stringify(serverState.history, null, 2))
+}
 
 // --- Global Registry ---
 // active_servers: Map<port, ServerState>
@@ -147,6 +162,9 @@ function handleMessage(data, ws, serverState) {
       serverState.history.shift()
     }
 
+    // Persist to disk
+    saveHistory(serverState)
+
     // Broadcast exact payload to all peers (connected + guest), excluding sender
     broadcastAll(serverState, payload, ws)
     console.log(`[MESH] Chat from ${payload.nick}: ${payload.msg}`)
@@ -276,4 +294,63 @@ function stopHost(port) {
   console.log(`[MESH] Server stopped on port ${port}`)
 }
 
-module.exports = { startHost, stopHost, active_servers }
+/**
+ * Gracefully shutdown a server: disconnect all peers, close WSS, save history, remove from registry.
+ * @param {number} port
+ */
+function shutdownServer(port) {
+  const serverState = active_servers.get(port)
+  if (!serverState) throw new Error('SERVER_NOT_FOUND')
+
+  // Close every connected peer's socket
+  for (const peer of serverState.connected_peers.values()) {
+    try { peer.ws.close(1000, 'server_shutdown') } catch {}
+  }
+  for (const peer of serverState.guest_peers.values()) {
+    try { peer.ws.close(1000, 'server_shutdown') } catch {}
+  }
+
+  // Persist final history
+  if (serverState.history.length > 0) saveHistory(serverState)
+
+  // Close the WebSocket server itself
+  serverState.wss.close()
+  serverState.running = false
+  active_servers.delete(port)
+  console.log(`[MESH] Server shutdown on port ${port}`)
+}
+
+/**
+ * Return a snapshot of all running servers for the UI.
+ * @returns {Array<{ port: number, name: string, code: string, peerCount: number, isRelay: boolean }>}
+ */
+function getActiveServers() {
+  const servers = []
+  for (const [port, state] of active_servers.entries()) {
+    servers.push({
+      port,
+      name:      state.room_name,
+      code:      state.room_code,
+      peerCount: state.connected_peers.size + state.guest_peers.size,
+      isRelay:   state.is_headless_relay,
+    })
+  }
+  return servers
+}
+
+/**
+ * Return connection info for an already-running server so the host can re-enter.
+ * @param {number} port
+ * @returns {{ code: string, history: Array, ws_url: string }}
+ */
+function reenterRoom(port) {
+  const serverState = active_servers.get(port)
+  if (!serverState) throw new Error('SERVER_NOT_FOUND')
+  return {
+    code:    serverState.room_code,
+    history: serverState.history,
+    ws_url:  `ws://localhost:${port}`,
+  }
+}
+
+module.exports = { startHost, stopHost, shutdownServer, getActiveServers, reenterRoom, active_servers }

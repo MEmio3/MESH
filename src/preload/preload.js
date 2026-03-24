@@ -34,6 +34,26 @@ contextBridge.exposeInMainWorld('meshBridge', {
    */
   stopRelay: (args) => ipcRenderer.invoke('py_stop_relay', args),
 
+  /**
+   * Get a snapshot of all running servers.
+   * @returns {Promise<Array<{ port: number, name: string, code: string, peerCount: number, isRelay: boolean }>>}
+   */
+  getRunningServers: () => ipcRenderer.invoke('py_get_running_servers'),
+
+  /**
+   * Gracefully shutdown a server by port.
+   * @param {{ port: number }} args
+   * @returns {Promise<{ ok: boolean } | { error: string }>}
+   */
+  shutdownPort: (args) => ipcRenderer.invoke('py_shutdown_port', args),
+
+  /**
+   * Re-enter an already-running server (host reconnects their UI).
+   * @param {{ port: number }} args
+   * @returns {Promise<{ code: string, history: Array, ws_url: string } | { error: string }>}
+   */
+  reenterRoom: (args) => ipcRenderer.invoke('py_reenter_room', args),
+
   // --- Main -> Renderer (on = event listener) ---
 
   /**
