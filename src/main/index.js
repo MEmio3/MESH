@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const network = require('./network')
+const config = require('./config')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -78,7 +79,18 @@ ipcMain.handle('py_reenter_room', async (_event, { port }) => {
   }
 })
 
+// Phase 1.6: Profile System
+
+ipcMain.handle('py_get_config', async () => {
+  return config.getConfig()
+})
+
+ipcMain.handle('py_save_config', async (_event, updates) => {
+  return config.saveConfig(updates)
+})
+
 app.whenReady().then(() => {
+  config.init(app.getPath('userData'))
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

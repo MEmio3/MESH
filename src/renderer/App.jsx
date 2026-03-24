@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react'
 import { useMeshSocket } from './useMeshSocket'
 import { ChatRoom } from './components/ChatRoom'
 import { RelayActive } from './components/RelayActive'
-
-// Stable session UID for this app instance
-const SESSION_UID = crypto.randomUUID()
+import { SetupProfile } from './components/SetupProfile'
 
 export default function App() {
+  // Profile config — loaded from disk on boot
+  const [config, setConfig] = useState(null) // null = loading, { uid, nickname, ... }
+
   // Connection state
   const [session, setSession]   = useState(null)   // null | { uid, nick, isHost, roomCode, roomName }
   const [messages, setMessages] = useState([])     // { type, uid, nick, msg, msg_id, isMine }[]
@@ -20,9 +21,26 @@ export default function App() {
 
   const socket = useMeshSocket()
 
+  // --- Load config on boot ---
+  useEffect(() => {
+    window.meshBridge.getConfig().then((cfg) => setConfig(cfg))
+  }, [])
+
   function addLog(msg) {
     console.log('[MESH UI]', msg)
     setLog((prev) => [...prev.slice(-9), msg])
+  }
+
+  // --- Convert server history items into UI message shape ---
+  function historyToMessages(history, myUid) {
+    return (history || []).map((h) => ({
+      type: 'chat',
+      uid: h.uid,
+      nick: h.nick,
+      msg: h.msg,
+      msg_id: h.msg_id,
+      isMine: h.uid === myUid,
+    }))
   }
 
   // --- Single message router — handles ALL WS message types ---
@@ -30,7 +48,11 @@ export default function App() {
     return function handleMessage(msg) {
       switch (msg.type) {
         case 'accepted':
-          setSession({ uid: SESSION_UID, nick, isHost, roomCode: msg.room_code, roomName: msg.room_name })
+          setSession({ uid: config.uid, nick, isHost, roomCode: msg.room_code, roomName: msg.room_name })
+          // Load chat history from server into messages state
+          if (msg.history && msg.history.length > 0) {
+            setMessages(historyToMessages(msg.history, config.uid))
+          }
           addLog(`Connected — ${msg.room_name} (${msg.room_code})`)
           console.log('[MESH UI] accepted payload:', msg)
           break
@@ -74,8 +96,8 @@ export default function App() {
     if (result.error) { addLog(`Error: ${result.error}`); return }
     addLog(`Server started — ${result.ws_url}`)
 
-    const nick = name
-    const joinPayload = { type: 'join', uid: SESSION_UID, nick, password, dp: '', bio: '' }
+    const nick = config.nickname
+    const joinPayload = { type: 'join', uid: config.uid, nick, password, dp: config.dp_dataurl, bio: config.bio }
     socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, true))
   }
 
@@ -89,8 +111,8 @@ export default function App() {
 
     if (!result.ws_url) { addLog('Error: no ws_url returned'); return }
 
-    const nick = 'Guest'
-    const joinPayload = { type: 'join', uid: SESSION_UID, nick, password, dp: '', bio: '' }
+    const nick = config.nickname
+    const joinPayload = { type: 'join', uid: config.uid, nick, password, dp: config.dp_dataurl, bio: config.bio }
     socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, false))
   }
 
@@ -133,6 +155,7 @@ export default function App() {
   const [activeServers, setActiveServers] = useState([])
 
   useEffect(() => {
+    if (!config) return // don't poll until config is loaded
     let mounted = true
     async function poll() {
       const servers = await window.meshBridge.getRunningServers()
@@ -141,7 +164,7 @@ export default function App() {
     poll()
     const interval = setInterval(poll, 3000)
     return () => { mounted = false; clearInterval(interval) }
-  }, [session, relay]) // re-subscribe when view changes
+  }, [config, session, relay])
 
   // --- Host re-enters an already-running room ---
   async function handleReenterRoom(port) {
@@ -149,8 +172,12 @@ export default function App() {
     if (result.error) { addLog(`Error: ${result.error}`); return }
 
     addLog(`Re-entering room on port ${port}...`)
-    const nick = hostForm.name || 'Host'
-    const joinPayload = { type: 'join', uid: SESSION_UID, nick, password: '', dp: '', bio: '' }
+    // Pre-load persisted history so it appears immediately
+    if (result.history && result.history.length > 0) {
+      setMessages(historyToMessages(result.history, config.uid))
+    }
+    const nick = config.nickname
+    const joinPayload = { type: 'join', uid: config.uid, nick, password: '', dp: config.dp_dataurl, bio: config.bio }
     socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, true))
   }
 
@@ -159,16 +186,37 @@ export default function App() {
     const result = await window.meshBridge.shutdownPort({ port })
     if (result.error) { addLog(`Error: ${result.error}`); return }
     addLog(`Server on port ${port} shut down.`)
-    // Immediately refresh the list
     const servers = await window.meshBridge.getRunningServers()
     setActiveServers(servers)
   }
 
-  // --- Render: RelayActive | ChatRoom | Dashboard ---
+  // --- Render gates ---
+
+  // 1. Still loading config
+  if (config === null) {
+    return (
+      <div className="min-h-screen bg-[#060608] flex items-center justify-center">
+        <span className="text-[#3a5040] text-sm tracking-widest uppercase">Loading...</span>
+      </div>
+    )
+  }
+
+  // 2. No nickname set — first-boot profile setup
+  if (!config.nickname) {
+    return (
+      <SetupProfile
+        uid={config.uid}
+        onComplete={(updatedConfig) => setConfig(updatedConfig)}
+      />
+    )
+  }
+
+  // 3. Active relay view
   if (relay) {
     return <RelayActive relay={relay} onStop={handleStopRelay} />
   }
 
+  // 4. In a chat room
   if (session) {
     return (
       <ChatRoom
@@ -181,7 +229,7 @@ export default function App() {
     )
   }
 
-  // ── Dashboard ─────────────────────────────────────────────────────────────
+  // ── 5. Dashboard ──────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-[#060608] text-[#e8f5e9] flex flex-col select-none relative">
@@ -191,7 +239,7 @@ export default function App() {
 
       <div className="relative z-10 flex flex-col min-h-screen">
 
-        {/* ── Header (minimal — no fake tabs) ── */}
+        {/* ── Header ── */}
         <header className="px-6 py-4 flex items-center gap-3 shrink-0 relative">
           <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-30" />
 
@@ -207,8 +255,11 @@ export default function App() {
             style={{ boxShadow: '0 0 8px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }}
           />
 
-          <div className="ml-auto font-mono text-xs text-[#7a9e82] tracking-wide" title={SESSION_UID}>
-            uid: {SESSION_UID.slice(0, 8)}…
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-xs text-[#e8f5e9] tracking-wide">{config.nickname}</span>
+            <span className="font-mono text-[10px] text-[#3a5040] tracking-wide" title={config.uid}>
+              {config.uid.slice(0, 8)}…
+            </span>
           </div>
         </header>
 

@@ -54,6 +54,19 @@ contextBridge.exposeInMainWorld('meshBridge', {
    */
   reenterRoom: (args) => ipcRenderer.invoke('py_reenter_room', args),
 
+  /**
+   * Read the local MESH profile config.
+   * @returns {Promise<{ uid: string, nickname: string, bio: string, dp_dataurl: string }>}
+   */
+  getConfig: () => ipcRenderer.invoke('py_get_config'),
+
+  /**
+   * Save/update the local MESH profile config.
+   * @param {Partial<{ nickname: string, bio: string, dp_dataurl: string }>} updates
+   * @returns {Promise<object>}
+   */
+  saveConfig: (updates) => ipcRenderer.invoke('py_save_config', updates),
+
   // --- Main -> Renderer (on = event listener) ---
 
   /**
