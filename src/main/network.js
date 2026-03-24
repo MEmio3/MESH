@@ -4,6 +4,7 @@
 
 const { WebSocketServer } = require('ws')
 const { MSG_TYPES, DEFAULTS } = require('../shared/constants')
+const config = require('./config')
 const fs = require('fs')
 const path = require('path')
 
@@ -16,8 +17,23 @@ function ensureLogsDir() {
 
 function saveHistory(serverState) {
   ensureLogsDir()
-  const filePath = path.join(LOGS_DIR, `room_${serverState.port}.json`)
+  const filePath = path.join(LOGS_DIR, `room_${serverState.room_code}.json`)
   fs.writeFileSync(filePath, JSON.stringify(serverState.history, null, 2))
+}
+
+/**
+ * Load persisted history for a room_code from disk (if it exists).
+ * @param {string} roomCode
+ * @returns {Array}
+ */
+function loadHistory(roomCode) {
+  const filePath = path.join(LOGS_DIR, `room_${roomCode}.json`)
+  if (fs.existsSync(filePath)) {
+    try {
+      return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+    } catch { return [] }
+  }
+  return []
 }
 
 // --- Global Registry ---
@@ -245,15 +261,23 @@ function handleConnection(ws, req, serverState) {
  * Start a WebSocket server and register it in active_servers.
  * Derived from core-flows.md: "Hosting a Room"
  *
- * @param {{ name: string, port: number, password: string, headless_relay: boolean }} args
+ * If room_code is provided (re-launch of a saved channel), pre-loads persisted history.
+ * Always saves the channel to the user's config.saved_channels.
+ *
+ * @param {{ name: string, port: number, password: string, headless_relay: boolean, room_code?: string }} args
  * @returns {{ code: string, history: Array, ws_url: string }}
  */
-function startHost({ name, port, password = '', headless_relay = false }) {
+function startHost({ name, port, password = '', headless_relay = false, room_code }) {
   if (active_servers.has(port)) {
     throw new Error('PORT_IN_USE')
   }
 
-  const room_code = Math.random().toString(36).slice(2, 8).toUpperCase()
+  // Use provided room_code (re-launch) or generate a fresh one
+  const code = room_code || Math.random().toString(36).slice(2, 8).toUpperCase()
+
+  // Pre-load persisted history if this channel was previously used
+  const history = loadHistory(code)
+
   const wss = new WebSocketServer({ port })
 
   // ServerState: NetworkNode fields + per-server peer registries
@@ -261,7 +285,7 @@ function startHost({ name, port, password = '', headless_relay = false }) {
   const serverState = {
     port,
     room_name: name,
-    room_code,
+    room_code: code,
     password,
     is_headless_relay: headless_relay,
     relay_auto_approve: false,
@@ -270,14 +294,19 @@ function startHost({ name, port, password = '', headless_relay = false }) {
     connected_peers: new Map(),
     guest_peers:     new Map(),
     pending_guests:  new Map(),
-    history:         [],
+    history,
   }
 
   active_servers.set(port, serverState)
   wss.on('connection', (ws, req) => handleConnection(ws, req, serverState))
 
-  console.log(`[MESH] Server started on port ${port} (code: ${room_code})`)
-  return { code: room_code, history: [], ws_url: `ws://localhost:${port}` }
+  // Persist this channel to saved_channels in the user's config
+  if (!headless_relay) {
+    config.addChannel({ room_code: code, name, port, password })
+  }
+
+  console.log(`[MESH] Server started on port ${port} (code: ${code})`)
+  return { code, history, ws_url: `ws://localhost:${port}` }
 }
 
 /**

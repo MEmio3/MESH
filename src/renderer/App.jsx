@@ -84,17 +84,30 @@ export default function App() {
   }
 
   // --- Hosting a Room — core-flows.md ---
-  async function handleStartRoom() {
-    const { name, port, password } = hostForm
+  async function handleStartRoom(overrides) {
+    const name = overrides?.name ?? hostForm.name
+    const port = overrides?.port ?? hostForm.port
+    const password = overrides?.password ?? hostForm.password
+    const room_code = overrides?.room_code ?? undefined
+
     if (!name || !port) { addLog('Name and Port are required.'); return }
 
     addLog(`Starting server on port ${port}...`)
     const result = await window.meshBridge.startHost({
-      name, port: Number(port), password, headless_relay: false,
+      name, port: Number(port), password, headless_relay: false, room_code,
     })
 
     if (result.error) { addLog(`Error: ${result.error}`); return }
     addLog(`Server started — ${result.ws_url}`)
+
+    // Refresh config — startHost saves the channel to saved_channels
+    const freshConfig = await window.meshBridge.getConfig()
+    setConfig(freshConfig)
+
+    // Pre-load persisted history so it appears immediately
+    if (result.history && result.history.length > 0) {
+      setMessages(historyToMessages(result.history, config.uid))
+    }
 
     const nick = config.nickname
     const joinPayload = { type: 'join', uid: config.uid, nick, password, dp: config.dp_dataurl, bio: config.bio }
@@ -188,6 +201,26 @@ export default function App() {
     addLog(`Server on port ${port} shut down.`)
     const servers = await window.meshBridge.getRunningServers()
     setActiveServers(servers)
+    // Refresh config so Saved Channels stays in sync
+    const freshConfig = await window.meshBridge.getConfig()
+    setConfig(freshConfig)
+  }
+
+  // --- Launch a saved channel from the Saved Channels panel ---
+  function handleLaunchSavedChannel(channel) {
+    handleStartRoom({
+      name: channel.name,
+      port: channel.port,
+      password: channel.password,
+      room_code: channel.room_code,
+    })
+  }
+
+  // --- Remove a saved channel ---
+  async function handleRemoveChannel(roomCode) {
+    const freshConfig = await window.meshBridge.removeChannel({ room_code: roomCode })
+    setConfig(freshConfig)
+    addLog(`Channel removed.`)
   }
 
   // --- Render gates ---
@@ -438,6 +471,54 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* SAVED CHANNELS */}
+            {config.saved_channels && config.saved_channels.length > 0 && (
+              <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-5 overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Saved Channels</span>
+                  <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+                </div>
+
+                <div className="flex flex-col gap-2.5">
+                  {config.saved_channels.map((ch) => {
+                    const isRunning = activeServers.some((s) => s.code === ch.room_code)
+                    return (
+                      <div key={ch.room_code} className="bg-[#181c23] border border-[rgba(16,124,16,0.14)] rounded px-3.5 py-3 flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold tracking-wide text-[#e8f5e9] truncate flex-1">{ch.name}</span>
+                          {isRunning && (
+                            <span className="text-[9px] tracking-[0.15em] uppercase text-[#107C10] border border-[rgba(16,124,16,0.3)] px-1.5 py-0.5 rounded">live</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] text-[#7a9e82] font-mono">
+                          <span>:{ch.port}</span>
+                          <span>{ch.room_code}</span>
+                          {ch.password && <span className="text-[#3a5040]">locked</span>}
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          {!isRunning && (
+                            <button
+                              onClick={() => handleLaunchSavedChannel(ch)}
+                              className="flex-1 text-[10px] font-bold tracking-[0.12em] uppercase bg-[#107C10] hover:bg-[#1a9f1a] text-white py-1.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.2)] hover:shadow-[0_0_20px_rgba(16,124,16,0.4)]"
+                            >
+                              Launch Server
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleRemoveChannel(ch.room_code)}
+                            className="text-[10px] font-bold tracking-[0.12em] uppercase border border-red-800/60 text-red-400 hover:bg-red-900/20 hover:border-red-700 px-3 py-1.5 rounded cursor-pointer transition-all duration-200"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* ACTIVITY LOG */}
             {log.length > 0 && (

@@ -67,6 +67,13 @@ contextBridge.exposeInMainWorld('meshBridge', {
    */
   saveConfig: (updates) => ipcRenderer.invoke('py_save_config', updates),
 
+  /**
+   * Remove a saved channel by room_code.
+   * @param {{ room_code: string }} args
+   * @returns {Promise<object>}
+   */
+  removeChannel: (args) => ipcRenderer.invoke('py_remove_channel', args),
+
   // --- Main -> Renderer (on = event listener) ---
 
   /**

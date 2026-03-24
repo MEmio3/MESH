@@ -89,6 +89,10 @@ ipcMain.handle('py_save_config', async (_event, updates) => {
   return config.saveConfig(updates)
 })
 
+ipcMain.handle('py_remove_channel', async (_event, { room_code }) => {
+  return config.removeChannel(room_code)
+})
+
 app.whenReady().then(() => {
   config.init(app.getPath('userData'))
   createWindow()
