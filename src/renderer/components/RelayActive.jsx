@@ -8,7 +8,7 @@ export function RelayActive({ relay, onStop }) {
 
       {/* ── Header ── */}
       <header className="px-6 py-4 border-b-2 border-gray-800 flex items-center gap-3 shrink-0">
-        <span className="text-xl font-bold tracking-widest text-blue-500">MESH</span>
+        <span className="text-xl font-bold tracking-widest text-[#107C10]">MESH</span>
         <span className="text-gray-700 text-xs">·</span>
         <span className="text-xs font-semibold uppercase tracking-widest text-gray-500">Relay Mode</span>
       </header>
@@ -38,7 +38,7 @@ export function RelayActive({ relay, onStop }) {
             </div>
             <div className="flex justify-between items-center bg-[#060608] border border-gray-800 rounded-none px-4 py-2.5">
               <span className="text-gray-500 text-xs uppercase tracking-widest">Code</span>
-              <span className="font-mono text-blue-400 text-sm tracking-widest">{relay.roomCode}</span>
+              <span className="font-mono text-[#107C10] text-sm tracking-widest">{relay.roomCode}</span>
             </div>
           </div>
 

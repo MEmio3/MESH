@@ -43,14 +43,14 @@ export function ChatRoom({ session, messages, users, onSendChat, onLeave }) {
 
       {/* ── Header ── */}
       <header className="px-5 py-3 border-b-2 border-gray-800 flex items-center gap-3 shrink-0">
-        <span className="text-base font-bold tracking-widest text-blue-500">MESH</span>
+        <span className="text-base font-bold tracking-widest text-[#107C10]">MESH</span>
         <span className="text-gray-700 text-xs">·</span>
         <span className="text-sm font-semibold uppercase tracking-widest text-zinc-200">{session.roomName}</span>
         <span className="font-mono text-xs bg-[#13161b] border-2 border-gray-800 px-2 py-0.5 rounded-none text-zinc-400">
           {session.roomCode}
         </span>
         {session.isHost && (
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-blue-400 bg-transparent border-2 border-blue-600 px-1.5 py-0.5 rounded-none">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-[#107C10] bg-transparent border-2 border-[#107C10] px-1.5 py-0.5 rounded-none">
             HOST
           </span>
         )}
@@ -84,7 +84,7 @@ export function ChatRoom({ session, messages, users, onSendChat, onLeave }) {
 
           {/* ── Input bar ── */}
           <div className="px-4 pb-4 pt-2 shrink-0 border-t-2 border-gray-800">
-            <div className="flex gap-2 items-center bg-[#13161b] border-2 border-gray-800 rounded-none px-3 py-2 focus-within:border-blue-600 transition-colors">
+            <div className="flex gap-2 items-center bg-[#13161b] border-2 border-gray-800 rounded-none px-3 py-2 focus-within:border-[#107C10] transition-colors">
               <input
                 ref={inputRef}
                 className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-gray-600 outline-none font-mono"
@@ -97,7 +97,7 @@ export function ChatRoom({ session, messages, users, onSendChat, onLeave }) {
               <button
                 onClick={sendAndClear}
                 disabled={!inputText.trim()}
-                className="bg-blue-600 hover:bg-blue-500 disabled:bg-[#13161b] disabled:text-gray-600 disabled:border-gray-800 text-white text-xs font-semibold px-4 py-1.5 rounded-none border-2 border-blue-600 disabled:border-gray-700 transition-all cursor-pointer disabled:cursor-not-allowed shrink-0 hover:shadow-[4px_4px_0px_0px_rgba(37,99,235,0.8)] hover:-translate-y-0.5 disabled:hover:shadow-none disabled:hover:translate-y-0"
+                className="bg-[#107C10] hover:bg-[#1a9f1a] disabled:bg-[#13161b] disabled:text-gray-600 disabled:border-gray-800 text-white text-xs font-semibold px-4 py-1.5 rounded-none border-2 border-[#107C10] disabled:border-gray-700 transition-all cursor-pointer disabled:cursor-not-allowed shrink-0 hover:shadow-[0_0_20px_rgba(16,124,16,0.45)] hover:-translate-y-0.5 disabled:hover:shadow-none disabled:hover:translate-y-0"
               >
                 Send
               </button>
@@ -133,7 +133,7 @@ function MessageBubble({ msg, session }) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[70%] flex flex-col items-end gap-0.5">
-          <div className="bg-blue-600 text-white text-sm px-3.5 py-2 rounded-none leading-relaxed">
+          <div className="bg-[#107C10] text-white text-sm px-3.5 py-2 rounded-none leading-relaxed">
             {msg.msg}
           </div>
           <span className="text-[10px] text-gray-600 px-1 font-mono">
@@ -147,7 +147,7 @@ function MessageBubble({ msg, session }) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[70%] flex flex-col gap-0.5">
-        <span className="text-[11px] font-semibold text-blue-400 px-1 uppercase tracking-widest">{msg.nick}</span>
+        <span className="text-[11px] font-semibold text-[#107C10] px-1 uppercase tracking-widest">{msg.nick}</span>
         <div className="bg-[#13161b] text-zinc-100 text-sm px-3.5 py-2 rounded-none leading-relaxed border border-gray-800">
           {msg.msg}
         </div>
@@ -164,13 +164,13 @@ function UserRow({ user, session }) {
 
   return (
     <div className="flex items-center gap-2 py-0.5">
-      <span className={`text-[10px] ${user.is_host ? 'text-blue-500' : 'text-gray-600'}`}>●</span>
+      <span className={`text-[10px] ${user.is_host ? 'text-[#107C10]' : 'text-gray-600'}`}>●</span>
       <span className="text-xs text-zinc-300 truncate flex-1 font-mono" title={user.uid}>
         {user.nick}
         {isMe && <span className="text-gray-600 ml-1">(you)</span>}
       </span>
       {user.is_host && (
-        <span className="text-[9px] text-blue-500 shrink-0 uppercase tracking-widest">HOST</span>
+        <span className="text-[9px] text-[#107C10] shrink-0 uppercase tracking-widest">HOST</span>
       )}
     </div>
   )

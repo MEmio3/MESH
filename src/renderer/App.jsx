@@ -6,90 +6,12 @@ import { RelayActive } from './components/RelayActive'
 // Stable session UID for this app instance
 const SESSION_UID = crypto.randomUUID()
 
-// ── Icon helpers ──────────────────────────────────────────────────────────────
-
-function IconGrid() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-      <rect x="1.5" y="1.5" width="7.5" height="7.5" rx="1" stroke="#3b82f6" strokeWidth="1.4"/>
-      <rect x="13" y="1.5" width="7.5" height="7.5" rx="1" stroke="#3b82f6" strokeWidth="1.4"/>
-      <rect x="1.5" y="13" width="7.5" height="7.5" rx="1" stroke="#3b82f6" strokeWidth="1.4"/>
-      <rect x="13" y="13" width="7.5" height="7.5" rx="1" stroke="#3b82f6" strokeWidth="1.4"/>
-    </svg>
-  )
-}
-
-function IconArrow() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-      <circle cx="11" cy="11" r="8.5" stroke="#3b82f6" strokeWidth="1.4"/>
-      <path d="M14 11L11 8M14 11L11 14M14 11H8" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  )
-}
-
-function IconServer() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <rect x="2" y="2" width="20" height="8" rx="2"/>
-      <rect x="2" y="14" width="20" height="8" rx="2"/>
-      <circle cx="6.5" cy="6" r="1" fill="currentColor" stroke="none"/>
-      <circle cx="6.5" cy="18" r="1" fill="currentColor" stroke="none"/>
-    </svg>
-  )
-}
-
-function IconSettings() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-    </svg>
-  )
-}
-
-// ── Shared card wrapper ────────────────────────────────────────────────────────
-
-function Panel({ children, className = '' }) {
-  return (
-    <div className={`bg-[#0d1117] border border-[#1e3a5c]/55 rounded-lg shadow-[0_0_0_1px_rgba(30,100,180,0.07),0_8px_32px_rgba(0,0,0,0.55)] ${className}`}>
-      {children}
-    </div>
-  )
-}
-
-// ── Field label ────────────────────────────────────────────────────────────────
-
-function FieldLabel({ children }) {
-  return (
-    <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5" style={{ color: 'rgba(96,165,250,0.55)' }}>
-      {children}
-    </label>
-  )
-}
-
-// ── Text input ─────────────────────────────────────────────────────────────────
-
-function Field({ type = 'text', placeholder, value, onChange, mono = false }) {
-  return (
-    <input
-      type={type}
-      className={`w-full bg-[#070a0f] border border-[#1a2d45]/75 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-600/60 transition-colors ${mono ? 'font-mono' : ''}`}
-      placeholder={placeholder}
-      value={value}
-      onChange={onChange}
-    />
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function App() {
   // Connection state
-  const [session, setSession]   = useState(null)
-  const [messages, setMessages] = useState([])
-  const [users, setUsers]       = useState([])
-  const [relay, setRelay]       = useState(null)
+  const [session, setSession]   = useState(null)   // null | { uid, nick, isHost, roomCode, roomName }
+  const [messages, setMessages] = useState([])     // { type, uid, nick, msg, msg_id, isMine }[]
+  const [users, setUsers]       = useState([])     // { uid, nick, is_host, status }[]
+  const [relay, setRelay]       = useState(null)   // null | { port, roomCode, name }
 
   // Dashboard form state
   const [hostForm, setHostForm] = useState({ name: '', port: '8765', password: '' })
@@ -227,213 +149,191 @@ export default function App() {
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#090c11] text-zinc-100 flex flex-col select-none overflow-hidden">
+    <div className="min-h-screen bg-[#060608] text-[#e8f5e9] flex flex-col select-none relative">
+      {/* Legacy ambient glow + scanlines */}
+      <div className="ambient-glow" />
+      <div className="scanlines" />
 
-      {/* ── Top Navigation Bar ── */}
-      <header className="px-6 py-3 bg-[#0a0e14] border-b border-[#1a2d45]/50 flex items-center gap-5 shrink-0">
+      <div className="relative z-10 flex flex-col min-h-screen">
 
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 shrink-0">
-          <span className="relative flex items-center justify-center w-6 h-6">
-            <span className="absolute w-5 h-5 rounded-full border-2 border-blue-500 opacity-40 animate-ping" style={{ animationDuration: '2.5s' }} />
-            <span className="w-3 h-3 rounded-full border-2 border-blue-400" />
+        {/* ── Header (minimal — no fake tabs) ── */}
+        <header className="px-6 py-4 flex items-center gap-3 shrink-0 relative">
+          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-30" />
+
+          <span
+            className="text-base font-bold tracking-[0.3em] text-[#107C10] uppercase"
+            style={{ animation: 'logo-pulse 2.5s ease-in-out infinite' }}
+          >
+            MESH
           </span>
-          <span className="text-sm font-bold tracking-[0.3em] text-white uppercase">Unified Hub</span>
-        </div>
 
-        {/* Nav tabs */}
-        <nav className="flex items-end gap-0.5 ml-4">
-          {['Messages', 'Relays', 'Rooms', 'Profile'].map((tab) => (
-            <div
-              key={tab}
-              className={`px-5 py-2 text-[11px] tracking-[0.18em] uppercase font-semibold transition-colors ${
-                tab === 'Rooms'
-                  ? 'text-blue-400 border-b-2 border-blue-500'
-                  : 'text-zinc-600 border-b-2 border-transparent'
-              }`}
-            >
-              {tab}
-            </div>
-          ))}
-        </nav>
+          <span
+            className="w-2 h-2 rounded-full bg-[#107C10]"
+            style={{ boxShadow: '0 0 8px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }}
+          />
 
-        {/* Right side */}
-        <div className="ml-auto flex items-center gap-3">
-          <button className="text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer p-1.5">
-            <IconSettings />
-          </button>
-          <div className="flex items-center gap-2 bg-[#0d1117] border border-[#1a2d45]/60 rounded-full pl-1 pr-3 py-1">
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-[11px] font-bold text-white shrink-0">
-              {SESSION_UID.slice(0, 1).toUpperCase()}
-            </div>
-            <span className="text-xs font-mono text-zinc-400 tracking-wide">{SESSION_UID.slice(0, 8)}</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+          <div className="ml-auto font-mono text-xs text-[#7a9e82] tracking-wide" title={SESSION_UID}>
+            uid: {SESSION_UID.slice(0, 8)}…
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* ── 3-Column Grid ── */}
-      <main className="flex-1 grid grid-cols-[1fr_1fr_1.15fr] gap-5 p-6 items-start overflow-y-auto">
+        {/* ── 2-Column Grid ── */}
+        <main className="flex-1 grid grid-cols-[1fr_320px] gap-6 p-6 items-start overflow-y-auto">
 
-        {/* ─── COL 1: HOST ─── */}
-        <Panel className="p-6 flex flex-col gap-5">
-          {/* Card header */}
-          <div>
-            <p className="text-[10px] tracking-[0.22em] uppercase mb-3.5" style={{ color: 'rgba(96,165,250,0.6)' }}>Host</p>
-            <div className="w-12 h-12 rounded-md border border-[#1e3a5c]/70 bg-[#080c12] flex items-center justify-center mb-4">
-              <IconGrid />
+          {/* ─── Left Column: Host + Join stacked ─── */}
+          <div className="flex flex-col gap-6">
+
+            {/* HOST CARD */}
+            <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-6 overflow-hidden hover:border-[rgba(16,124,16,0.38)] transition-all duration-200 shadow-[0_8px_32px_rgba(0,0,0,0.55)]">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
+
+              <div className="flex items-center gap-2 mb-5">
+                <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Host</span>
+                <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+              </div>
+
+              <h2 className="text-base font-bold tracking-[0.12em] uppercase text-[#e8f5e9] mb-5">Create Room</h2>
+
+              <div className="flex flex-col gap-3.5">
+                <div>
+                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Room Name</label>
+                  <input
+                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
+                    placeholder="e.g. Alpha Squad"
+                    value={hostForm.name}
+                    onChange={(e) => setHostForm((f) => ({ ...f, name: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Port</label>
+                  <input
+                    type="number"
+                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none font-mono focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
+                    placeholder="8765"
+                    value={hostForm.port}
+                    onChange={(e) => setHostForm((f) => ({ ...f, port: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">
+                    Password <span className="text-[#3a5040] normal-case tracking-normal text-[9px]">(optional)</span>
+                  </label>
+                  <input
+                    type="password"
+                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
+                    placeholder="Leave blank for open room"
+                    value={hostForm.password}
+                    onChange={(e) => setHostForm((f) => ({ ...f, password: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-5">
+                <button
+                  onClick={handleStartRoom}
+                  className="flex-1 bg-[#107C10] hover:bg-[#1a9f1a] text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_20px_rgba(16,124,16,0.25)] hover:shadow-[0_0_32px_rgba(16,124,16,0.45)] hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  Start Room
+                </button>
+                <button
+                  onClick={handleStartRelay}
+                  className="flex-1 border border-[#107C10] text-[#107C10] bg-transparent hover:bg-[rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)] text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
+                  title="Start a headless relay — routes direct messages only"
+                >
+                  Start as Relay
+                </button>
+              </div>
             </div>
-            <h2 className="text-[17px] font-bold tracking-[0.12em] uppercase text-white">Create Room</h2>
+
+            {/* JOIN CARD */}
+            <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-6 overflow-hidden hover:border-[rgba(16,124,16,0.38)] transition-all duration-200 shadow-[0_8px_32px_rgba(0,0,0,0.55)]">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
+
+              <div className="flex items-center gap-2 mb-5">
+                <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Join</span>
+                <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+              </div>
+
+              <h2 className="text-base font-bold tracking-[0.12em] uppercase text-[#e8f5e9] mb-5">Join Room</h2>
+
+              <div className="flex flex-col gap-3.5">
+                <div>
+                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Host IP</label>
+                  <input
+                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none font-mono focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
+                    placeholder="192.168.1.x"
+                    value={joinForm.ip}
+                    onChange={(e) => setJoinForm((f) => ({ ...f, ip: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Port</label>
+                  <input
+                    type="number"
+                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none font-mono focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
+                    placeholder="8765"
+                    value={joinForm.port}
+                    onChange={(e) => setJoinForm((f) => ({ ...f, port: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Password</label>
+                  <input
+                    type="password"
+                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
+                    placeholder="Enter room password"
+                    value={joinForm.password}
+                    onChange={(e) => setJoinForm((f) => ({ ...f, password: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={handleJoinRoom}
+                className="w-full mt-5 flex items-center justify-center gap-2.5 border border-[#107C10] bg-[rgba(16,124,16,0.05)] hover:bg-[rgba(16,124,16,0.12)] hover:border-[rgba(16,124,16,0.6)] text-[#107C10] text-[11px] font-bold tracking-[0.18em] uppercase px-4 py-3 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)]"
+              >
+                <span className="text-sm leading-none">→</span>
+                Request Access
+              </button>
+            </div>
+
           </div>
 
-          {/* Form */}
-          <div className="flex flex-col gap-3">
-            <div>
-              <FieldLabel>Room Name</FieldLabel>
-              <Field
-                placeholder="e.g. Alpha Squad"
-                value={hostForm.name}
-                onChange={(e) => setHostForm((f) => ({ ...f, name: e.target.value }))}
-              />
+          {/* ─── Right Column: Active Servers + Activity Log ─── */}
+          <div className="flex flex-col gap-5">
+
+            {/* ACTIVE SERVERS */}
+            <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-5 overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Active Servers</span>
+                <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+              </div>
+              <p className="text-xs text-[#3a5040] text-center py-3">No servers running.</p>
             </div>
-            <div>
-              <FieldLabel>Port</FieldLabel>
-              <Field
-                type="number"
-                mono
-                placeholder="8765"
-                value={hostForm.port}
-                onChange={(e) => setHostForm((f) => ({ ...f, port: e.target.value }))}
-              />
-            </div>
-            <div>
-              <FieldLabel>
-                Password <span style={{ color: 'rgba(113,113,122,0.6)' }}>(optional)</span>
-              </FieldLabel>
-              <Field
-                type="password"
-                placeholder="Leave blank for open room"
-                value={hostForm.password}
-                onChange={(e) => setHostForm((f) => ({ ...f, password: e.target.value }))}
-              />
-            </div>
+
+            {/* ACTIVITY LOG */}
+            {log.length > 0 && (
+              <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-5 overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Activity Log</span>
+                  <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+                </div>
+                <div className="flex flex-col gap-1 font-mono text-[11px]">
+                  {log.map((entry, i) => (
+                    <span key={i} className="text-[#7a9e82]">
+                      <span className="text-[#107C10]">›</span> {entry}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
 
-          {/* Buttons */}
-          <div className="flex gap-2.5 pt-1">
-            <button
-              onClick={handleStartRoom}
-              className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded transition-all cursor-pointer shadow-[0_0_18px_rgba(37,99,235,0.45)] hover:shadow-[0_0_28px_rgba(37,99,235,0.65)]"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-              Start Room
-            </button>
-            <button
-              onClick={handleStartRelay}
-              className="flex-1 flex items-center justify-center gap-2 border border-blue-600/55 text-blue-400 hover:bg-blue-900/20 hover:border-blue-500/80 bg-transparent text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded transition-all cursor-pointer"
-              title="Start a headless relay — routes direct messages only"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-              Start as Relay
-            </button>
-          </div>
-        </Panel>
-
-        {/* ─── COL 2: JOIN + HOSTED RELAYS ─── */}
-        <div className="flex flex-col gap-5">
-          <Panel className="p-6 flex flex-col gap-5">
-            {/* Card header */}
-            <div>
-              <p className="text-[10px] tracking-[0.22em] uppercase mb-3.5" style={{ color: 'rgba(96,165,250,0.6)' }}>Join</p>
-              <div className="w-12 h-12 rounded-md border border-[#1e3a5c]/70 bg-[#080c12] flex items-center justify-center mb-4">
-                <IconArrow />
-              </div>
-              <h2 className="text-[17px] font-bold tracking-[0.12em] uppercase text-white">Join Room</h2>
-            </div>
-
-            {/* Form */}
-            <div className="flex flex-col gap-3">
-              <div>
-                <FieldLabel>Host IP</FieldLabel>
-                <Field
-                  mono
-                  placeholder="192.168.1.x"
-                  value={joinForm.ip}
-                  onChange={(e) => setJoinForm((f) => ({ ...f, ip: e.target.value }))}
-                />
-              </div>
-              <div>
-                <FieldLabel>Port</FieldLabel>
-                <Field
-                  type="number"
-                  mono
-                  placeholder="8765"
-                  value={joinForm.port}
-                  onChange={(e) => setJoinForm((f) => ({ ...f, port: e.target.value }))}
-                />
-              </div>
-              <div>
-                <FieldLabel>Password</FieldLabel>
-                <Field
-                  type="password"
-                  placeholder="Enter room password"
-                  value={joinForm.password}
-                  onChange={(e) => setJoinForm((f) => ({ ...f, password: e.target.value }))}
-                />
-              </div>
-            </div>
-
-            <button
-              onClick={handleJoinRoom}
-              className="w-full flex items-center justify-center gap-2.5 border border-blue-600/65 bg-[#090e18] hover:bg-blue-900/25 hover:border-blue-500/80 text-blue-300 text-[11px] font-bold tracking-[0.18em] uppercase px-4 py-3 rounded transition-all cursor-pointer shadow-[0_0_12px_rgba(37,99,235,0.12)] hover:shadow-[0_0_20px_rgba(37,99,235,0.2)]"
-            >
-              <span className="text-sm leading-none">→</span>
-              Request Access
-            </button>
-          </Panel>
-
-          {/* My Hosted Relays */}
-          <Panel className="p-5">
-            <p className="text-[10px] tracking-[0.22em] uppercase mb-3" style={{ color: 'rgba(96,165,250,0.6)' }}>My Hosted Relays</p>
-            <p className="text-xs text-zinc-700 text-center py-3">No active relays.</p>
-          </Panel>
-        </div>
-
-        {/* ─── COL 3: Hosted Channels + Servers + Log ─── */}
-        <div className="flex flex-col gap-5">
-
-          {/* My Hosted Channels */}
-          <Panel className="p-5">
-            <p className="text-[10px] tracking-[0.22em] uppercase mb-3" style={{ color: 'rgba(96,165,250,0.6)' }}>My Hosted Channels</p>
-            <p className="text-xs text-zinc-700 text-center py-3">No rooms hosted this session.</p>
-          </Panel>
-
-          {/* Running Servers */}
-          <Panel className="p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-blue-400/60"><IconServer /></span>
-              <p className="text-[10px] tracking-[0.22em] uppercase" style={{ color: 'rgba(96,165,250,0.6)' }}>Running Servers</p>
-            </div>
-            <p className="text-xs text-zinc-700 text-center py-2">No servers running.</p>
-          </Panel>
-
-          {/* Activity Log — only visible once there's output */}
-          {log.length > 0 && (
-            <Panel className="p-5">
-              <p className="text-[10px] tracking-[0.22em] uppercase mb-3" style={{ color: 'rgba(96,165,250,0.6)' }}>Activity Log</p>
-              <div className="flex flex-col gap-1 font-mono text-[11px]">
-                {log.map((entry, i) => (
-                  <span key={i} className="text-zinc-500">
-                    <span style={{ color: 'rgba(30,80,150,0.9)' }}>›</span> {entry}
-                  </span>
-                ))}
-              </div>
-            </Panel>
-          )}
-
-        </div>
-
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

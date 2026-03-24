@@ -1,13 +1,69 @@
 @import "tailwindcss";
 
+/* ── MESH Xbox-Green Design Tokens ── */
 :root {
-  --color-mesh-bg: #09090b;
-  --color-mesh-accent: #3b82f6;
+  --accent-rgb: 16, 124, 16;
+  --mesh-accent: #107C10;
+  --mesh-accent-bright: #1a9f1a;
+  --bg-void: #060608;
+  --bg-card: #13161b;
+  --bg-input: #0d0f13;
+  --bg-elevated: #181c23;
+  --text-primary: #e8f5e9;
+  --text-secondary: #7a9e82;
+  --text-muted: #3a5040;
+  --border-default: rgba(16, 124, 16, 0.14);
+  --border-hover: rgba(16, 124, 16, 0.38);
 }
 
 body {
-  background-color: var(--color-mesh-bg);
-  color: #f4f4f5;
+  background-color: var(--bg-void);
+  color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;
   margin: 0;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ── Scanlines — legacy CRT effect ── */
+.scanlines {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.06) 2px,
+    rgba(0, 0, 0, 0.06) 4px
+  );
+}
+
+/* ── Ambient corner glow ── */
+.ambient-glow {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 60% 40% at 10% 100%, rgba(var(--accent-rgb), 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 35% at 90% 0%, rgba(var(--accent-rgb), 0.04) 0%, transparent 55%);
+}
+
+/* ── Logo pulse animation ── */
+@keyframes logo-pulse {
+  0%, 100% { filter: drop-shadow(0 0 12px rgba(var(--accent-rgb), 0.6)); }
+  50% { filter: drop-shadow(0 0 28px rgba(var(--accent-rgb), 0.9)); }
+}
+
+/* ── Status dot blink ── */
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Green-accent scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #0a4f0a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mesh-accent); }

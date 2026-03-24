@@ -7,7 +7,7 @@ export default {
     extend: {
       colors: {
         'mesh-bg': '#09090b',
-        'mesh-accent': '#3b82f6',
+        'mesh-accent': '#107C10',
       },
     },
   },
