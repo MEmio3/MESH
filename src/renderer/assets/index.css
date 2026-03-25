@@ -1,69 +1,170 @@
 @import "tailwindcss";
 
-/* ── MESH Xbox-Green Design Tokens ── */
+/* ── MESH Glass Design System ── */
 :root {
   --accent-rgb: 16, 124, 16;
   --mesh-accent: #107C10;
   --mesh-accent-bright: #1a9f1a;
-  --bg-void: #060608;
-  --bg-card: #13161b;
-  --bg-input: #0d0f13;
-  --bg-elevated: #181c23;
-  --text-primary: #e8f5e9;
-  --text-secondary: #7a9e82;
-  --text-muted: #3a5040;
-  --border-default: rgba(16, 124, 16, 0.14);
-  --border-hover: rgba(16, 124, 16, 0.38);
+  --bg-void: #080c08;
+  --bg-glass: rgba(14, 20, 14, 0.65);
+  --bg-glass-strong: rgba(14, 20, 14, 0.82);
+  --bg-card: rgba(16, 22, 16, 0.55);
+  --bg-input: rgba(8, 12, 8, 0.7);
+  --bg-elevated: rgba(22, 30, 22, 0.6);
+  --text-primary: #e2efe3;
+  --text-secondary: #8aac8e;
+  --text-muted: #3d5441;
+  --border-glass: rgba(16, 124, 16, 0.12);
+  --border-hover: rgba(16, 124, 16, 0.3);
 }
 
 body {
   background-color: var(--bg-void);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(var(--accent-rgb), 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 0% 100%, rgba(var(--accent-rgb), 0.04) 0%, transparent 50%);
   color: var(--text-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Scanlines — legacy CRT effect ── */
-.scanlines {
-  pointer-events: none;
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.06) 2px,
-    rgba(0, 0, 0, 0.06) 4px
-  );
+/* ── Glass card base ── */
+.glass-card {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid var(--border-glass);
+  border-radius: 1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-/* ── Ambient corner glow ── */
+.glass-card:hover {
+  border-color: var(--border-hover);
+}
+
+.glass-card-strong {
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--border-glass);
+  border-radius: 1rem;
+}
+
+/* ── Subtle top-edge highlight on cards ── */
+.glass-edge::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 1.5rem;
+  right: 1.5rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.25), transparent);
+  border-radius: 1px;
+}
+
+/* ── Ambient glow (softer, wider) ── */
 .ambient-glow {
   pointer-events: none;
   position: fixed;
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(ellipse 60% 40% at 10% 100%, rgba(var(--accent-rgb), 0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 35% at 90% 0%, rgba(var(--accent-rgb), 0.04) 0%, transparent 55%);
+    radial-gradient(ellipse 70% 50% at 15% 95%, rgba(var(--accent-rgb), 0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 85% 5%, rgba(var(--accent-rgb), 0.05) 0%, transparent 55%);
 }
 
 /* ── Logo pulse animation ── */
 @keyframes logo-pulse {
-  0%, 100% { filter: drop-shadow(0 0 12px rgba(var(--accent-rgb), 0.6)); }
-  50% { filter: drop-shadow(0 0 28px rgba(var(--accent-rgb), 0.9)); }
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.5)); }
+  50% { filter: drop-shadow(0 0 24px rgba(var(--accent-rgb), 0.8)); }
 }
 
 /* ── Status dot blink ── */
 @keyframes status-blink {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
-/* ── Green-accent scrollbar ── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+/* ── Smooth fade-in for cards ── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out both;
+}
+
+/* ── Green-accent scrollbar (thinner, subtler) ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #0a4f0a; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--mesh-accent); }
+::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb), 0.25); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.5); }
+
+/* ── Input shared styling ── */
+.mesh-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-glass);
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mesh-input::placeholder {
+  color: var(--text-muted);
+}
+
+.mesh-input:focus {
+  border-color: var(--mesh-accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+}
+
+/* ── Primary button ── */
+.mesh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.mesh-btn-primary {
+  background: linear-gradient(135deg, #107C10 0%, #0e6b0e 100%);
+  color: white;
+  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.25);
+}
+
+.mesh-btn-primary:hover {
+  background: linear-gradient(135deg, #1a9f1a 0%, #107C10 100%);
+  box-shadow: 0 4px 28px rgba(var(--accent-rgb), 0.4);
+  transform: translateY(-1px);
+}
+
+.mesh-btn-primary:active {
+  transform: translateY(0);
+}
+
+.mesh-btn-ghost {
+  background: transparent;
+  color: var(--mesh-accent);
+  border: 1px solid var(--border-hover);
+}
+
+.mesh-btn-ghost:hover {
+  background: rgba(var(--accent-rgb), 0.08);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.15);
+  transform: translateY(-1px);
+}

@@ -1,8 +1,23 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useMeshSocket } from './useMeshSocket'
 import { ChatRoom } from './components/ChatRoom'
 import { RelayActive } from './components/RelayActive'
 import { SetupProfile } from './components/SetupProfile'
+import { TitleBar } from './components/TitleBar'
+
+/** Dashboard header avatar with onError fallback for broken data URLs */
+function DashboardAvatar({ dpDataurl }) {
+  const [failed, setFailed] = useState(false)
+  return (
+    <div className="w-9 h-9 rounded-xl border border-[rgba(16,124,16,0.25)] bg-[rgba(8,12,8,0.6)] overflow-hidden shrink-0 group-hover:border-[#107C10] group-hover:shadow-[0_0_16px_rgba(16,124,16,0.3)] transition-all">
+      {dpDataurl && !failed ? (
+        <img src={dpDataurl} alt="" className="w-full h-full object-cover" onError={() => setFailed(true)} />
+      ) : (
+        <svg className="w-full h-full p-1.5 text-[#3d5441]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      )}
+    </div>
+  )
+}
 
 export default function App() {
   // Profile config — loaded from disk on boot
@@ -19,8 +34,10 @@ export default function App() {
   const [joinForm, setJoinForm] = useState({ ip: '', port: '8765', password: '' })
   const [log, setLog]           = useState([])
   const [editingProfile, setEditingProfile] = useState(false)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
 
   const socket = useMeshSocket()
+  const pendingUploadRef = useRef(null)
 
   // --- Load config on boot ---
   useEffect(() => {
@@ -41,6 +58,9 @@ export default function App() {
       msg: h.msg,
       msg_id: h.msg_id,
       media: h.media ?? null,
+      reply_to: h.reply_to ?? null,
+      forwarded: h.forwarded ?? false,
+      edited: h.edited ?? false,
       reactions: h.reactions ?? {},
       isMine: h.uid === myUid,
     }))
@@ -52,12 +72,18 @@ export default function App() {
       switch (msg.type) {
         case 'accepted':
           setSession({ uid: config.uid, nick, isHost, roomCode: msg.room_code, roomName: msg.room_name })
-          // Load chat history from server into messages state
-          if (msg.history && msg.history.length > 0) {
-            setMessages(historyToMessages(msg.history, config.uid))
+          // Load chat history from server — always replace to get latest state
+          {
+            const hist = msg.history || []
+            console.log(`[MESH] accepted: ${hist.length} history entries`)
+            hist.forEach((h, i) => {
+              const flags = [h.reply_to ? 'reply' : '', h.forwarded ? 'fwd' : '', h.edited ? 'edit' : ''].filter(Boolean).join(',')
+              console.log(`  [${i}] ${h.msg_id} uid=${h.uid?.slice(0,6)} msg="${(h.msg || '').slice(0,30)}" ${flags || '-'}`)
+            })
+            setMessages(historyToMessages(hist, config.uid))
           }
+          setHasMoreHistory(msg.has_more ?? false)
           addLog(`Connected — ${msg.room_name} (${msg.room_code})`)
-          console.log('[MESH UI] accepted payload:', msg)
           break
 
         case 'user_list':
@@ -65,8 +91,34 @@ export default function App() {
           break
 
         case 'chat':
-          setMessages((prev) => [...prev, { ...msg, isMine: false }])
+          setMessages((prev) => [...prev, { ...msg, isMine: false, edited: msg.edited ?? false }])
           setUsers((prev) => prev.map((u) => u.uid === msg.uid ? { ...u, nick: msg.nick } : u))
+          break
+
+        case 'reaction':
+          // Skip if this is our own reaction echoing back (already handled optimistically)
+          if (msg.uid === config.uid) break
+          setMessages((prev) => prev.map((m) => {
+            if (m.msg_id !== msg.msg_id) return m
+            const reactions = { ...(m.reactions || {}) }
+            if (reactions[msg.uid] === msg.emoji) delete reactions[msg.uid]
+            else reactions[msg.uid] = msg.emoji
+            return { ...m, reactions }
+          }))
+          break
+
+        case 'msg_edit':
+          console.log(`[MESH] Received msg_edit: msg_id=${msg.msg_id} uid=${msg.uid} myUid=${config.uid} skipping=${msg.uid === config.uid}`)
+          if (msg.uid === config.uid) break // already handled optimistically
+          setMessages((prev) => prev.map((m) =>
+            m.msg_id === msg.msg_id ? { ...m, msg: msg.new_msg, edited: true } : m
+          ))
+          break
+
+        case 'msg_delete':
+          console.log(`[MESH] Received msg_delete: msg_id=${msg.msg_id} uid=${msg.uid} myUid=${config.uid} skipping=${msg.uid === config.uid}`)
+          if (msg.uid === config.uid) break // already handled optimistically
+          setMessages((prev) => prev.filter((m) => m.msg_id !== msg.msg_id))
           break
 
         case 'mesh_peer_joined':
@@ -78,6 +130,18 @@ export default function App() {
 
         case 'mesh_peer_left':
           setUsers((prev) => prev.filter((u) => u.uid !== msg.uid))
+          break
+
+        case 'media_uploaded':
+          if (pendingUploadRef.current) {
+            pendingUploadRef.current.resolve(msg)
+            pendingUploadRef.current = null
+          }
+          break
+
+        case 'history_batch':
+          setMessages((prev) => [...historyToMessages(msg.messages, config.uid), ...prev])
+          setHasMoreHistory(msg.has_more ?? false)
           break
 
         default:
@@ -111,6 +175,7 @@ export default function App() {
     if (result.history && result.history.length > 0) {
       setMessages(historyToMessages(result.history, config.uid))
     }
+    setHasMoreHistory(result.has_more ?? false)
 
     const nick = config.nickname
     const joinPayload = { type: 'join', uid: config.uid, nick, password, dp: config.dp_dataurl, bio: config.bio }
@@ -133,12 +198,99 @@ export default function App() {
   }
 
   // --- Chat actions passed to ChatRoom ---
-  function handleSendChat(text) {
-    if (!text.trim() || !session) return
+  async function handleSendChat(text, media = null, extra = null) {
+    if ((!text.trim() && !media) || !session) return
     const msg_id = Date.now().toString(36).slice(-8).toUpperCase()
-    const payload = { type: 'chat', uid: session.uid, nick: session.nick, msg: text.trim(), msg_id }
+
+    let mediaRef = null
+    if (media?.arrayBuffer) {
+      const uploadHeader = { type: 'media_upload', filename: media.filename, mime: media.mime, videoThumbnail: media.videoThumbnail || undefined }
+      socket.sendBinary(uploadHeader, media.arrayBuffer)
+      try {
+        const uploaded = await new Promise((resolve, reject) => {
+          pendingUploadRef.current = { resolve, reject }
+          setTimeout(() => {
+            if (pendingUploadRef.current) {
+              pendingUploadRef.current = null
+              reject(new Error('Upload timeout'))
+            }
+          }, 30000)
+        })
+        mediaRef = {
+          media_id: uploaded.media_id,
+          type: media.type,
+          filename: media.filename,
+          mime: media.mime,
+          size: media.size,
+          thumbnail: uploaded.thumbnail || media.videoThumbnail || null,
+        }
+      } catch (err) {
+        console.error('[MESH] Media upload failed:', err)
+        return
+      }
+    } else if (media) {
+      mediaRef = media
+    }
+
+    const payload = {
+      type: 'chat', uid: session.uid, nick: session.nick, msg: text.trim(), msg_id, media: mediaRef,
+      ...(extra?.reply_to ? { reply_to: extra.reply_to } : {}),
+      ...(extra?.forwarded ? { forwarded: true } : {}),
+    }
+    console.log(`[MESH] handleSendChat: extra=${JSON.stringify(extra)?.slice(0,200)} payload.reply_to=${!!payload.reply_to} payload.forwarded=${!!payload.forwarded}`)
     socket.sendMessage(payload)
-    setMessages((prev) => [...prev, { ...payload, isMine: true }])
+    setMessages((prev) => [...prev, { ...payload, isMine: true, reactions: {} }])
+  }
+
+  function handleEditMessage(msg_id, new_msg) {
+    if (!session) { console.warn('[MESH] handleEditMessage: no session'); return }
+    console.log(`[MESH] handleEditMessage: msg_id=${msg_id} new_msg="${new_msg}" uid=${session.uid}`)
+    socket.sendMessage({ type: 'msg_edit', msg_id, uid: session.uid, new_msg })
+    setMessages((prev) => {
+      const found = prev.find((m) => m.msg_id === msg_id)
+      console.log(`[MESH] Edit optimistic: found=${!!found} msg_id=${msg_id}`)
+      return prev.map((m) =>
+        m.msg_id === msg_id ? { ...m, msg: new_msg, edited: true } : m
+      )
+    })
+  }
+
+  function handleDeleteMessage(msg_id) {
+    if (!session) { console.warn('[MESH] handleDeleteMessage: no session'); return }
+    console.log(`[MESH] handleDeleteMessage: msg_id=${msg_id} uid=${session.uid}`)
+    socket.sendMessage({ type: 'msg_delete', msg_id, uid: session.uid })
+    setMessages((prev) => {
+      const found = prev.find((m) => m.msg_id === msg_id)
+      console.log(`[MESH] Delete optimistic: found=${!!found} msg_id=${msg_id} before=${prev.length} after=${prev.length - (found ? 1 : 0)}`)
+      return prev.filter((m) => m.msg_id !== msg_id)
+    })
+  }
+
+  function handleReaction(msg_id, emoji) {
+    if (!session) return
+    const payload = { type: 'reaction', msg_id, uid: session.uid, emoji }
+    socket.sendMessage(payload)
+    // Optimistic update
+    setMessages((prev) => prev.map((m) => {
+      if (m.msg_id !== msg_id) return m
+      const reactions = { ...(m.reactions || {}) }
+      if (reactions[session.uid] === emoji) delete reactions[session.uid]
+      else reactions[session.uid] = emoji
+      return { ...m, reactions }
+    }))
+  }
+
+  async function handleFetchMedia(mediaId) {
+    const result = await socket.fetchMedia(mediaId)
+    const blob = new Blob([result.data], { type: result.header.mime || 'application/octet-stream' })
+    return URL.createObjectURL(blob)
+  }
+
+  function handleLoadOlder() {
+    if (!messages.length) return
+    const oldestMsgId = messages[0]?.msg_id
+    if (!oldestMsgId) return
+    socket.sendMessage({ type: 'history_fetch', before_msg_id: oldestMsgId })
   }
 
   function handleLeave() {
@@ -146,6 +298,7 @@ export default function App() {
     setSession(null)
     setMessages([])
     setUsers([])
+    setHasMoreHistory(false)
   }
 
   // --- Headless Relay ---
@@ -192,6 +345,7 @@ export default function App() {
     if (result.history && result.history.length > 0) {
       setMessages(historyToMessages(result.history, config.uid))
     }
+    setHasMoreHistory(result.has_more ?? false)
     const nick = config.nickname
     const joinPayload = { type: 'join', uid: config.uid, nick, password: '', dp: config.dp_dataurl, bio: config.bio }
     socket.connect(result.ws_url, joinPayload, makeMessageHandler(nick, true))
@@ -231,8 +385,11 @@ export default function App() {
   // 1. Still loading config
   if (config === null) {
     return (
-      <div className="min-h-screen bg-[#060608] flex items-center justify-center">
-        <span className="text-[#3a5040] text-sm tracking-widest uppercase">Loading...</span>
+      <div className="h-screen flex flex-col bg-[var(--bg-void)]">
+        <TitleBar />
+        <div className="flex-1 flex items-center justify-center">
+          <span className="text-[var(--text-muted)] text-sm tracking-widest uppercase">Loading...</span>
+        </div>
       </div>
     )
   }
@@ -240,259 +397,218 @@ export default function App() {
   // 2. No nickname set — first-boot profile setup
   if (!config.nickname) {
     return (
-      <SetupProfile
-        uid={config.uid}
-        onComplete={(updatedConfig) => setConfig(updatedConfig)}
-      />
+      <div className="h-screen flex flex-col bg-[var(--bg-void)]">
+        <TitleBar />
+        <div className="flex-1 overflow-y-auto">
+          <SetupProfile
+            uid={config.uid}
+            onComplete={(updatedConfig) => setConfig(updatedConfig)}
+          />
+        </div>
+      </div>
     )
   }
 
   // 3. Editing profile
   if (editingProfile) {
     return (
-      <SetupProfile
-        uid={config.uid}
-        existingConfig={config}
-        onComplete={(updatedConfig) => { setConfig(updatedConfig); setEditingProfile(false) }}
-        onCancel={() => setEditingProfile(false)}
-      />
+      <div className="h-screen flex flex-col bg-[var(--bg-void)]">
+        <TitleBar />
+        <div className="flex-1 overflow-y-auto">
+          <SetupProfile
+            uid={config.uid}
+            existingConfig={config}
+            onComplete={(updatedConfig) => { setConfig(updatedConfig); setEditingProfile(false) }}
+            onCancel={() => setEditingProfile(false)}
+          />
+        </div>
+      </div>
     )
   }
 
   // 4. Active relay view
   if (relay) {
-    return <RelayActive relay={relay} onStop={handleStopRelay} />
+    return (
+      <div className="h-screen flex flex-col bg-[var(--bg-void)]">
+        <TitleBar />
+        <div className="flex-1 overflow-hidden">
+          <RelayActive relay={relay} onStop={handleStopRelay} />
+        </div>
+      </div>
+    )
   }
 
   // 5. In a chat room
   if (session) {
     return (
-      <ChatRoom
-        session={session}
-        messages={messages}
-        users={users}
-        onSendChat={handleSendChat}
-        onLeave={handleLeave}
-      />
+      <div className="h-screen flex flex-col bg-[var(--bg-void)]">
+        <TitleBar />
+        <div className="flex-1 overflow-hidden">
+          <ChatRoom
+            session={session}
+            messages={messages}
+            users={users}
+            onSendChat={handleSendChat}
+            onReaction={handleReaction}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onLeave={handleLeave}
+            hasMoreHistory={hasMoreHistory}
+            onLoadOlder={handleLoadOlder}
+            onFetchMedia={handleFetchMedia}
+          />
+        </div>
+      </div>
     )
   }
 
   // ── 6. Dashboard ──────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#060608] text-[#e8f5e9] flex flex-col select-none relative">
-      {/* Legacy ambient glow + scanlines */}
+    <div className="h-screen bg-[#080c08] text-[#e2efe3] flex flex-col select-none relative">
+      <TitleBar />
       <div className="ambient-glow" />
-      <div className="scanlines" />
 
-      <div className="relative z-10 flex flex-col min-h-screen">
+      <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
 
         {/* ── Header ── */}
-        <header className="px-6 py-4 flex items-center gap-3 shrink-0 relative">
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-30" />
+        <header className="glass-card-strong mx-4 mt-4 px-5 py-3 flex items-center gap-4 shrink-0 rounded-2xl">
 
           <span
-            className="text-base font-bold tracking-[0.3em] text-[#107C10] uppercase"
+            className="text-lg font-bold tracking-[0.25em] text-[#107C10] uppercase"
             style={{ animation: 'logo-pulse 2.5s ease-in-out infinite' }}
           >
             MESH
           </span>
 
           <span
-            className="w-2 h-2 rounded-full bg-[#107C10]"
+            className="w-2 h-2 rounded-full bg-[#107C10] shrink-0"
             style={{ boxShadow: '0 0 8px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }}
           />
 
-          <button
-            onClick={() => setEditingProfile(true)}
-            className="ml-auto flex items-center gap-2.5 cursor-pointer group bg-transparent border-none p-0"
-            title="Edit profile"
-          >
-            <div className="flex flex-col items-end gap-0.5">
-              <span className="text-xs text-[#e8f5e9] tracking-wide group-hover:text-[#107C10] transition-colors">{config.nickname}</span>
-              <span className="font-mono text-[10px] text-[#3a5040] tracking-wide">
-                {config.uid.slice(0, 8)}…
-              </span>
-            </div>
-            <div className="w-8 h-8 rounded-full border border-[rgba(16,124,16,0.38)] bg-[#0d0f13] overflow-hidden shrink-0 group-hover:border-[#107C10] group-hover:shadow-[0_0_12px_rgba(16,124,16,0.25)] transition-all">
-              {config.dp_dataurl ? (
-                <img src={config.dp_dataurl} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <svg className="w-full h-full p-1.5 text-[#3a5040]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              )}
-            </div>
-          </button>
+          <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={() => setEditingProfile(true)}
+              className="flex items-center gap-3 cursor-pointer group bg-transparent border-none p-0"
+              title="Edit profile"
+            >
+              <div className="flex flex-col items-end">
+                <span className="text-sm font-semibold text-[#e2efe3] group-hover:text-[#107C10] transition-colors">{config.nickname}</span>
+                <span className="font-mono text-[10px] text-[#3d5441] tracking-wide">
+                  {config.uid.slice(0, 8)}...
+                </span>
+              </div>
+              <DashboardAvatar dpDataurl={config.dp_dataurl} />
+            </button>
+          </div>
         </header>
 
-        {/* ── 2-Column Grid ── */}
-        <main className="flex-1 grid grid-cols-[1fr_320px] gap-6 p-6 items-start overflow-y-auto">
+        {/* ── Bento Grid ── */}
+        <main className="flex-1 grid grid-cols-[1fr_1fr_340px] gap-4 p-4 items-start overflow-y-auto">
 
-          {/* ─── Left Column: Host + Join stacked ─── */}
-          <div className="flex flex-col gap-6">
-
-            {/* HOST CARD */}
-            <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-6 overflow-hidden hover:border-[rgba(16,124,16,0.38)] transition-all duration-200 shadow-[0_8px_32px_rgba(0,0,0,0.55)]">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
-
-              <div className="flex items-center gap-2 mb-5">
-                <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Host</span>
-                <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+          {/* ─── HOST CARD ─── */}
+          <div className="glass-card relative p-6 overflow-hidden animate-fade-up glass-edge" style={{ animationDelay: '0ms' }}>
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-8 h-8 rounded-lg bg-[rgba(16,124,16,0.12)] flex items-center justify-center">
+                <svg className="w-4 h-4 text-[#107C10]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
               </div>
+              <h2 className="text-base font-bold text-[#e2efe3]">Create Room</h2>
+            </div>
 
-              <h2 className="text-base font-bold tracking-[0.12em] uppercase text-[#e8f5e9] mb-5">Create Room</h2>
-
-              <div className="flex flex-col gap-3.5">
-                <div>
-                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Room Name</label>
-                  <input
-                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
-                    placeholder="e.g. Alpha Squad"
-                    value={hostForm.name}
-                    onChange={(e) => setHostForm((f) => ({ ...f, name: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Port</label>
-                  <input
-                    type="number"
-                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none font-mono focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
-                    placeholder="8765"
-                    value={hostForm.port}
-                    onChange={(e) => setHostForm((f) => ({ ...f, port: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">
-                    Password <span className="text-[#3a5040] normal-case tracking-normal text-[9px]">(optional)</span>
-                  </label>
-                  <input
-                    type="password"
-                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
-                    placeholder="Leave blank for open room"
-                    value={hostForm.password}
-                    onChange={(e) => setHostForm((f) => ({ ...f, password: e.target.value }))}
-                  />
-                </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="block text-[11px] font-medium mb-1.5 text-[#8aac8e]">Room Name</label>
+                <input className="mesh-input" placeholder="e.g. Alpha Squad" value={hostForm.name} onChange={(e) => setHostForm((f) => ({ ...f, name: e.target.value }))} />
               </div>
-
-              <div className="flex gap-3 pt-5">
-                <button
-                  onClick={handleStartRoom}
-                  className="flex-1 flex items-center justify-center gap-2 bg-[#107C10] hover:bg-[#1a9f1a] text-white text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_20px_rgba(16,124,16,0.25)] hover:shadow-[0_0_32px_rgba(16,124,16,0.45)] hover:-translate-y-0.5 active:translate-y-0"
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  Start Room
-                </button>
-                <button
-                  onClick={handleStartRelay}
-                  className="flex-1 flex items-center justify-center gap-2 border border-[#107C10] text-[#107C10] bg-transparent hover:bg-[rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)] text-[11px] font-bold tracking-[0.15em] uppercase px-4 py-2.5 rounded cursor-pointer transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
-                  title="Start a headless relay — routes direct messages only"
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                  Start as Relay
-                </button>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium mb-1.5 text-[#8aac8e]">Port</label>
+                  <input type="number" className="mesh-input font-mono" placeholder="8765" value={hostForm.port} onChange={(e) => setHostForm((f) => ({ ...f, port: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium mb-1.5 text-[#8aac8e]">Password</label>
+                  <input type="password" className="mesh-input" placeholder="Optional" value={hostForm.password} onChange={(e) => setHostForm((f) => ({ ...f, password: e.target.value }))} />
+                </div>
               </div>
             </div>
 
-            {/* JOIN CARD */}
-            <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-6 overflow-hidden hover:border-[rgba(16,124,16,0.38)] transition-all duration-200 shadow-[0_8px_32px_rgba(0,0,0,0.55)]">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
-
-              <div className="flex items-center gap-2 mb-5">
-                <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Join</span>
-                <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
-              </div>
-
-              <h2 className="text-base font-bold tracking-[0.12em] uppercase text-[#e8f5e9] mb-5">Join Room</h2>
-
-              <div className="flex flex-col gap-3.5">
-                <div>
-                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Host IP</label>
-                  <input
-                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none font-mono focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
-                    placeholder="192.168.1.x"
-                    value={joinForm.ip}
-                    onChange={(e) => setJoinForm((f) => ({ ...f, ip: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Port</label>
-                  <input
-                    type="number"
-                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none font-mono focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
-                    placeholder="8765"
-                    value={joinForm.port}
-                    onChange={(e) => setJoinForm((f) => ({ ...f, port: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] tracking-[0.18em] uppercase mb-1.5 text-[#7a9e82]">Password</label>
-                  <input
-                    type="password"
-                    className="w-full bg-[#0d0f13] border border-[rgba(16,124,16,0.14)] rounded px-3 py-2.5 text-sm text-[#e8f5e9] placeholder-[#3a5040] outline-none focus:border-[#107C10] focus:shadow-[0_0_0_3px_rgba(16,124,16,0.1),inset_0_0_0_1px_rgba(16,124,16,0.08)] transition-all duration-200"
-                    placeholder="Enter room password"
-                    value={joinForm.password}
-                    onChange={(e) => setJoinForm((f) => ({ ...f, password: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <button
-                onClick={handleJoinRoom}
-                className="w-full mt-5 flex items-center justify-center gap-2.5 border border-[#107C10] bg-[rgba(16,124,16,0.05)] hover:bg-[rgba(16,124,16,0.12)] hover:border-[rgba(16,124,16,0.6)] text-[#107C10] text-[11px] font-bold tracking-[0.18em] uppercase px-4 py-3 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.08)] hover:shadow-[0_0_20px_rgba(16,124,16,0.2)]"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-                Request Access
+            <div className="flex gap-3 pt-5">
+              <button onClick={handleStartRoom} className="mesh-btn mesh-btn-primary flex-1">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start Room
+              </button>
+              <button onClick={handleStartRelay} className="mesh-btn mesh-btn-ghost flex-1" title="Headless relay — routes direct messages only">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Relay
               </button>
             </div>
-
           </div>
 
-          {/* ─── Right Column: Active Servers + Activity Log ─── */}
-          <div className="flex flex-col gap-5">
+          {/* ─── JOIN CARD ─── */}
+          <div className="glass-card relative p-6 overflow-hidden animate-fade-up glass-edge" style={{ animationDelay: '60ms' }}>
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-8 h-8 rounded-lg bg-[rgba(16,124,16,0.12)] flex items-center justify-center">
+                <svg className="w-4 h-4 text-[#107C10]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+              </div>
+              <h2 className="text-base font-bold text-[#e2efe3]">Join Room</h2>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="block text-[11px] font-medium mb-1.5 text-[#8aac8e]">Host IP</label>
+                <input className="mesh-input font-mono" placeholder="192.168.1.x" value={joinForm.ip} onChange={(e) => setJoinForm((f) => ({ ...f, ip: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium mb-1.5 text-[#8aac8e]">Port</label>
+                  <input type="number" className="mesh-input font-mono" placeholder="8765" value={joinForm.port} onChange={(e) => setJoinForm((f) => ({ ...f, port: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium mb-1.5 text-[#8aac8e]">Password</label>
+                  <input type="password" className="mesh-input" placeholder="Optional" value={joinForm.password} onChange={(e) => setJoinForm((f) => ({ ...f, password: e.target.value }))} />
+                </div>
+              </div>
+            </div>
+
+            <button onClick={handleJoinRoom} className="mesh-btn mesh-btn-ghost w-full mt-5">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+              Request Access
+            </button>
+          </div>
+
+          {/* ─── Right Column: Servers + Channels + Log ─── */}
+          <div className="flex flex-col gap-4 row-span-2">
 
             {/* ACTIVE SERVERS */}
-            <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-5 overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Active Servers</span>
-                <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+            <div className="glass-card relative p-5 overflow-hidden animate-fade-up glass-edge" style={{ animationDelay: '120ms' }}>
+              <div className="flex items-center gap-2.5 mb-4">
+                <div className="w-7 h-7 rounded-lg bg-[rgba(16,124,16,0.12)] flex items-center justify-center">
+                  <svg className="w-3.5 h-3.5 text-[#107C10]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                </div>
+                <span className="text-sm font-bold text-[#e2efe3]">Active Servers</span>
               </div>
 
               {activeServers.length === 0 ? (
-                <p className="text-xs text-[#3a5040] text-center py-3">No servers running.</p>
+                <p className="text-xs text-[#3d5441] text-center py-4">No servers running</p>
               ) : (
-                <div className="flex flex-col gap-2.5">
+                <div className="flex flex-col gap-2">
                   {activeServers.map((srv) => (
-                    <div key={srv.port} className="bg-[#181c23] border border-[rgba(16,124,16,0.14)] rounded px-3.5 py-3 flex flex-col gap-2">
+                    <div key={srv.port} className="bg-[rgba(16,22,16,0.5)] border border-[rgba(16,124,16,0.1)] rounded-xl px-4 py-3 flex flex-col gap-2">
                       <div className="flex items-center gap-2">
-                        <span
-                          className="w-2 h-2 rounded-full bg-[#107C10] shrink-0"
-                          style={{ boxShadow: '0 0 6px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }}
-                        />
-                        <span className="text-xs font-bold tracking-wide text-[#e8f5e9] truncate flex-1">{srv.name}</span>
-                        {srv.isRelay && (
-                          <span className="text-[9px] tracking-[0.15em] uppercase text-[#7a9e82] border border-[rgba(16,124,16,0.3)] px-1.5 py-0.5 rounded">relay</span>
-                        )}
+                        <span className="w-2 h-2 rounded-full bg-[#107C10] shrink-0" style={{ boxShadow: '0 0 6px #107C10', animation: 'status-blink 2.5s ease-in-out infinite' }} />
+                        <span className="text-xs font-semibold text-[#e2efe3] truncate flex-1">{srv.name}</span>
+                        {srv.isRelay && <span className="text-[9px] text-[#8aac8e] bg-[rgba(16,124,16,0.1)] px-2 py-0.5 rounded-md">relay</span>}
                       </div>
-                      <div className="flex items-center gap-3 text-[10px] text-[#7a9e82] font-mono">
+                      <div className="flex items-center gap-3 text-[10px] text-[#8aac8e] font-mono">
                         <span>:{srv.port}</span>
                         <span>{srv.code}</span>
                         <span>{srv.peerCount} peer{srv.peerCount !== 1 ? 's' : ''}</span>
                       </div>
                       <div className="flex gap-2 pt-1">
                         {!srv.isRelay && (
-                          <button
-                            onClick={() => handleReenterRoom(srv.port)}
-                            className="flex-1 text-[10px] font-bold tracking-[0.12em] uppercase bg-[#107C10] hover:bg-[#1a9f1a] text-white py-1.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.2)] hover:shadow-[0_0_20px_rgba(16,124,16,0.4)]"
-                          >
-                            Re-Join
-                          </button>
+                          <button onClick={() => handleReenterRoom(srv.port)} className="mesh-btn mesh-btn-primary flex-1 !py-1.5 !text-[10px]">Re-Join</button>
                         )}
-                        <button
-                          onClick={() => handleShutdownServer(srv.port)}
-                          className="flex-1 text-[10px] font-bold tracking-[0.12em] uppercase border border-red-800/60 text-red-400 hover:bg-red-900/20 hover:border-red-700 py-1.5 rounded cursor-pointer transition-all duration-200"
-                        >
+                        <button onClick={() => handleShutdownServer(srv.port)} className="flex-1 text-[10px] font-semibold border border-red-900/50 text-red-400 hover:bg-red-900/15 py-1.5 rounded-lg cursor-pointer transition-all">
                           Shutdown
                         </button>
                       </div>
@@ -504,42 +620,33 @@ export default function App() {
 
             {/* SAVED CHANNELS */}
             {config.saved_channels && config.saved_channels.length > 0 && (
-              <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-5 overflow-hidden">
-                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Saved Channels</span>
-                  <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+              <div className="glass-card relative p-5 overflow-hidden animate-fade-up glass-edge" style={{ animationDelay: '180ms' }}>
+                <div className="flex items-center gap-2.5 mb-4">
+                  <div className="w-7 h-7 rounded-lg bg-[rgba(16,124,16,0.12)] flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5 text-[#107C10]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                  </div>
+                  <span className="text-sm font-bold text-[#e2efe3]">Saved Channels</span>
                 </div>
 
-                <div className="flex flex-col gap-2.5">
+                <div className="flex flex-col gap-2">
                   {config.saved_channels.map((ch) => {
                     const isRunning = activeServers.some((s) => s.code === ch.room_code)
                     return (
-                      <div key={ch.room_code} className="bg-[#181c23] border border-[rgba(16,124,16,0.14)] rounded px-3.5 py-3 flex flex-col gap-2">
+                      <div key={ch.room_code} className="bg-[rgba(16,22,16,0.5)] border border-[rgba(16,124,16,0.1)] rounded-xl px-4 py-3 flex flex-col gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold tracking-wide text-[#e8f5e9] truncate flex-1">{ch.name}</span>
-                          {isRunning && (
-                            <span className="text-[9px] tracking-[0.15em] uppercase text-[#107C10] border border-[rgba(16,124,16,0.3)] px-1.5 py-0.5 rounded">live</span>
-                          )}
+                          <span className="text-xs font-semibold text-[#e2efe3] truncate flex-1">{ch.name}</span>
+                          {isRunning && <span className="text-[9px] text-[#107C10] bg-[rgba(16,124,16,0.12)] px-2 py-0.5 rounded-md font-semibold">live</span>}
                         </div>
-                        <div className="flex items-center gap-3 text-[10px] text-[#7a9e82] font-mono">
+                        <div className="flex items-center gap-3 text-[10px] text-[#8aac8e] font-mono">
                           <span>:{ch.port}</span>
                           <span>{ch.room_code}</span>
-                          {ch.password && <span className="text-[#3a5040]">locked</span>}
+                          {ch.password && <span className="text-[#3d5441]">locked</span>}
                         </div>
                         <div className="flex gap-2 pt-1">
                           {!isRunning && (
-                            <button
-                              onClick={() => handleLaunchSavedChannel(ch)}
-                              className="flex-1 text-[10px] font-bold tracking-[0.12em] uppercase bg-[#107C10] hover:bg-[#1a9f1a] text-white py-1.5 rounded cursor-pointer transition-all duration-200 shadow-[0_0_12px_rgba(16,124,16,0.2)] hover:shadow-[0_0_20px_rgba(16,124,16,0.4)]"
-                            >
-                              Launch Server
-                            </button>
+                            <button onClick={() => handleLaunchSavedChannel(ch)} className="mesh-btn mesh-btn-primary flex-1 !py-1.5 !text-[10px]">Launch</button>
                           )}
-                          <button
-                            onClick={() => handleRemoveChannel(ch.room_code)}
-                            className="text-[10px] font-bold tracking-[0.12em] uppercase border border-red-800/60 text-red-400 hover:bg-red-900/20 hover:border-red-700 px-3 py-1.5 rounded cursor-pointer transition-all duration-200"
-                          >
+                          <button onClick={() => handleRemoveChannel(ch.room_code)} className="text-[10px] font-semibold border border-red-900/50 text-red-400 hover:bg-red-900/15 px-3 py-1.5 rounded-lg cursor-pointer transition-all">
                             Remove
                           </button>
                         </div>
@@ -552,16 +659,17 @@ export default function App() {
 
             {/* ACTIVITY LOG */}
             {log.length > 0 && (
-              <div className="relative bg-[#13161b] border border-[rgba(16,124,16,0.14)] rounded-lg p-5 overflow-hidden">
-                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#107C10] to-transparent opacity-40" />
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[10px] tracking-[0.35em] uppercase font-bold text-[#107C10]">Activity Log</span>
-                  <span className="flex-1 h-px bg-[rgba(16,124,16,0.14)]" />
+              <div className="glass-card relative p-5 overflow-hidden animate-fade-up glass-edge" style={{ animationDelay: '240ms' }}>
+                <div className="flex items-center gap-2.5 mb-3">
+                  <div className="w-7 h-7 rounded-lg bg-[rgba(16,124,16,0.12)] flex items-center justify-center">
+                    <svg className="w-3.5 h-3.5 text-[#107C10]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  </div>
+                  <span className="text-sm font-bold text-[#e2efe3]">Activity</span>
                 </div>
-                <div className="flex flex-col gap-1 font-mono text-[11px]">
+                <div className="flex flex-col gap-1.5 font-mono text-[11px]">
                   {log.map((entry, i) => (
-                    <span key={i} className="text-[#7a9e82]">
-                      <span className="text-[#107C10]">›</span> {entry}
+                    <span key={i} className="text-[#8aac8e]">
+                      <span className="text-[#107C10] mr-1">›</span>{entry}
                     </span>
                   ))}
                 </div>

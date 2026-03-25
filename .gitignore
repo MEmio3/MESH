@@ -4,8 +4,9 @@ node_modules/
 # Build outputs
 dist/
 
-# Chat history logs
+# Chat history logs & media uploads
 logs/
+media/
 dist-electron/
 release/
 

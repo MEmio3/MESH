@@ -5,13 +5,16 @@ const config = require('./config')
 
 const isDev = process.env.NODE_ENV === 'development'
 
+let mainWindow = null
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#09090b',
+    frame: false,
+    backgroundColor: '#080c08',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
@@ -19,12 +22,22 @@ function createWindow() {
     },
   })
 
+  mainWindow = win
+
   if (isDev) {
     win.loadURL('http://localhost:5173')
   } else {
     win.loadFile(path.join(__dirname, '..', '..', 'dist', 'renderer', 'index.html'))
   }
 }
+
+// --- Window control IPC ---
+ipcMain.handle('window-minimize', () => mainWindow?.minimize())
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+  else mainWindow?.maximize()
+})
+ipcMain.handle('window-close', () => mainWindow?.close())
 
 // --- IPC Handler Stubs ---
 // Derived from .claude/rules/core-flows.md

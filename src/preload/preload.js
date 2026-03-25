@@ -74,6 +74,11 @@ contextBridge.exposeInMainWorld('meshBridge', {
    */
   removeChannel: (args) => ipcRenderer.invoke('py_remove_channel', args),
 
+  // --- Window controls (frameless titlebar) ---
+  minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+  maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
+  closeWindow: () => ipcRenderer.invoke('window-close'),
+
   // --- Main -> Renderer (on = event listener) ---
 
   /**

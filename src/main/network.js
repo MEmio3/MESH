@@ -6,6 +6,7 @@ const { WebSocketServer } = require('ws')
 const { MSG_TYPES, DEFAULTS } = require('../shared/constants')
 const config = require('./config')
 const { encrypt, decrypt } = require('./crypto')
+const media = require('./media')
 const fs = require('fs')
 const path = require('path')
 
@@ -90,10 +91,20 @@ function handleClose(ws, serverState) {
   console.log(`[MESH] Peer disconnected: ${uid}`)
 }
 
-function handleMessage(data, ws, serverState) {
+function handleMessage(data, isBinary, ws, serverState) {
+  // Binary frame: media upload from client
+  if (isBinary) {
+    return handleBinaryMessage(data, ws, serverState)
+  }
+
   let payload
   try {
-    payload = JSON.parse(data.toString())
+    const raw = data.toString()
+    payload = JSON.parse(raw)
+    // Trace: log raw payload for chat/edit/delete to debug persistence
+    if (payload.type === 'chat' || payload.type === 'msg_edit' || payload.type === 'msg_delete') {
+      console.log(`[MESH TRACE] ${payload.type} raw keys: [${Object.keys(payload).join(',')}] reply_to=${JSON.stringify(payload.reply_to ?? 'ABSENT').slice(0,100)} forwarded=${payload.forwarded}`)
+    }
   } catch {
     console.warn('[MESH] Received non-JSON message — ignoring')
     return
@@ -140,13 +151,19 @@ function handleMessage(data, ws, serverState) {
     // --- Add to registry ---
     serverState.connected_peers.set(payload.uid, peer)
 
-    // --- Send accepted to new client ---
-    // network-schemas.md: "Host -> New Client (Accepted)"
+    // --- Send accepted to new client (paginated) ---
+    const histSlice = serverState.history.slice(-DEFAULTS.PAGE_SIZE)
+    console.log(`[MESH] Sending accepted with ${histSlice.length} history entries (total: ${serverState.history.length})`)
+    histSlice.forEach((h, i) => {
+      const flags = [h.reply_to ? 'reply' : '', h.forwarded ? 'fwd' : '', h.edited ? 'edit' : ''].filter(Boolean).join(',')
+      console.log(`  [${i}] ${h.msg_id} uid=${h.uid?.slice(0,6)} "${(h.msg || '').slice(0,30)}" ${flags || '-'}`)
+    })
     send(ws, {
       type: MSG_TYPES.ACCEPTED,
       room_code: serverState.room_code,
       room_name: serverState.room_name,
-      history: serverState.history,
+      history: histSlice,
+      has_more: serverState.history.length > DEFAULTS.PAGE_SIZE,
     })
 
     // --- Send user_list to new client ---
@@ -173,6 +190,11 @@ function handleMessage(data, ws, serverState) {
     // Only registered peers may broadcast chat
     if (!serverState.connected_peers.has(ws._mesh_uid)) return
 
+    // Debug: log full payload to verify reply_to/forwarded arrive from client
+    console.log(`[MESH] Chat payload keys: ${Object.keys(payload).join(',')}`)
+    if (payload.reply_to) console.log(`[MESH] Chat has reply_to: ${JSON.stringify(payload.reply_to).slice(0, 200)}`)
+    if (payload.forwarded) console.log(`[MESH] Chat is forwarded`)
+
     // Append to history — trim to DEFAULTS.HISTORY_LIMIT
     // History shape from state-models.md
     serverState.history.push({
@@ -181,6 +203,8 @@ function handleMessage(data, ws, serverState) {
       msg:       payload.msg,
       msg_id:    payload.msg_id,
       media:     payload.media ?? null,
+      reply_to:  payload.reply_to ?? null,
+      forwarded: payload.forwarded ?? false,
       reactions: {},
       seen_by:   [],
     })
@@ -194,6 +218,100 @@ function handleMessage(data, ws, serverState) {
     // Broadcast exact payload to all peers (connected + guest), excluding sender
     broadcastAll(serverState, payload, ws)
     console.log(`[MESH] Chat from ${payload.nick}: ${payload.msg}`)
+    return
+  }
+
+  if (payload.type === MSG_TYPES.REACTION) {
+    if (!serverState.connected_peers.has(ws._mesh_uid)) return
+
+    const entry = serverState.history.find((h) => h.msg_id === payload.msg_id)
+    if (entry) {
+      if (!entry.reactions) entry.reactions = {}
+      // Toggle: same emoji removes it, different emoji updates it
+      if (entry.reactions[payload.uid] === payload.emoji) {
+        delete entry.reactions[payload.uid]
+      } else {
+        entry.reactions[payload.uid] = payload.emoji
+      }
+      saveHistory(serverState)
+    }
+
+    // Broadcast to all peers (including sender so their UI updates)
+    broadcastAll(serverState, payload)
+    return
+  }
+
+  if (payload.type === MSG_TYPES.MSG_EDIT) {
+    console.log(`[MESH] msg_edit received: msg_id=${payload.msg_id} uid=${payload.uid} ws._mesh_uid=${ws._mesh_uid} inPeers=${serverState.connected_peers.has(ws._mesh_uid)}`)
+    if (!serverState.connected_peers.has(ws._mesh_uid)) { console.log('[MESH] msg_edit rejected: not in connected_peers'); return }
+    const entry = serverState.history.find((h) => h.msg_id === payload.msg_id && h.uid === payload.uid)
+    if (entry) {
+      entry.msg = payload.new_msg
+      entry.edited = true
+      saveHistory(serverState)
+      console.log(`[MESH] Message edited: ${payload.msg_id} → "${payload.new_msg?.slice(0, 50)}"`)
+    } else {
+      console.log(`[MESH] Edit failed — msg ${payload.msg_id} not found for uid ${payload.uid}. History msg_ids: ${serverState.history.map(h => h.msg_id).join(',')}`)
+    }
+    broadcastAll(serverState, { type: MSG_TYPES.MSG_EDIT, msg_id: payload.msg_id, uid: payload.uid, new_msg: payload.new_msg })
+    return
+  }
+
+  if (payload.type === MSG_TYPES.MSG_DELETE) {
+    console.log(`[MESH] msg_delete received: msg_id=${payload.msg_id} uid=${payload.uid} ws._mesh_uid=${ws._mesh_uid} inPeers=${serverState.connected_peers.has(ws._mesh_uid)}`)
+    if (!serverState.connected_peers.has(ws._mesh_uid)) { console.log('[MESH] msg_delete rejected: not in connected_peers'); return }
+    const idx = serverState.history.findIndex((h) => h.msg_id === payload.msg_id && h.uid === payload.uid)
+    if (idx !== -1) {
+      serverState.history.splice(idx, 1)
+      saveHistory(serverState)
+      console.log(`[MESH] Message deleted: ${payload.msg_id} (history now ${serverState.history.length} entries)`)
+    } else {
+      console.log(`[MESH] Delete failed — msg ${payload.msg_id} not found for uid ${payload.uid}`)
+      console.log(`[MESH] History entries: ${serverState.history.map(h => `${h.msg_id}(uid:${h.uid?.slice(0,6)})`).join(', ')}`)
+    }
+    broadcastAll(serverState, { type: MSG_TYPES.MSG_DELETE, msg_id: payload.msg_id, uid: payload.uid })
+    return
+  }
+
+  if (payload.type === MSG_TYPES.MEDIA_FETCH) {
+    if (!serverState.connected_peers.has(ws._mesh_uid)) return
+
+    const fileBuf = media.loadMedia(serverState.room_code, payload.media_id)
+    if (!fileBuf) {
+      send(ws, { type: MSG_TYPES.MEDIA_ERROR, media_id: payload.media_id })
+      return
+    }
+
+    // Look up mime/filename from history
+    const histEntry = serverState.history.find((h) => h.media?.media_id === payload.media_id)
+    const respHeader = {
+      type: MSG_TYPES.MEDIA_DATA,
+      media_id: payload.media_id,
+      mime: histEntry?.media?.mime || 'application/octet-stream',
+      filename: histEntry?.media?.filename || 'file',
+    }
+    const respHeaderStr = JSON.stringify(respHeader)
+    const respHeaderBuf = Buffer.from(respHeaderStr, 'utf-8')
+    const lenBuf = Buffer.alloc(4)
+    lenBuf.writeUInt32BE(respHeaderBuf.length)
+    ws.send(Buffer.concat([lenBuf, respHeaderBuf, fileBuf]))
+    console.log(`[MESH] Media sent: ${payload.media_id}`)
+    return
+  }
+
+  if (payload.type === MSG_TYPES.HISTORY_FETCH) {
+    const idx = serverState.history.findIndex((h) => h.msg_id === payload.before_msg_id)
+    if (idx <= 0) {
+      send(ws, { type: MSG_TYPES.HISTORY_BATCH, messages: [], has_more: false })
+      return
+    }
+    const start = Math.max(0, idx - DEFAULTS.PAGE_SIZE)
+    const batch = serverState.history.slice(start, idx)
+    send(ws, {
+      type: MSG_TYPES.HISTORY_BATCH,
+      messages: batch,
+      has_more: start > 0,
+    })
     return
   }
 
@@ -259,9 +377,44 @@ function handleMessage(data, ws, serverState) {
   console.log(`[MESH] Unhandled message type: ${payload.type}`)
 }
 
+function handleBinaryMessage(data, ws, serverState) {
+  try {
+    const headerLen = data.readUInt32BE(0)
+    const headerStr = data.subarray(4, 4 + headerLen).toString('utf-8')
+    const header = JSON.parse(headerStr)
+    const binaryData = data.subarray(4 + headerLen)
+
+    if (header.type === MSG_TYPES.MEDIA_UPLOAD) {
+      if (!serverState.connected_peers.has(ws._mesh_uid)) return
+
+      const mediaId = media.generateMediaId()
+      media.saveMedia(serverState.room_code, mediaId, binaryData)
+
+      let thumbnail = null
+      if (header.mime && header.mime.startsWith('image/')) {
+        thumbnail = media.generateImageThumbnail(binaryData)
+      } else if (header.mime && header.mime.startsWith('video/') && header.videoThumbnail) {
+        thumbnail = header.videoThumbnail
+      }
+
+      send(ws, {
+        type: MSG_TYPES.MEDIA_UPLOADED,
+        media_id: mediaId,
+        thumbnail,
+      })
+      console.log(`[MESH] Media saved: ${mediaId} (${header.filename}, ${binaryData.length} bytes, thumbnail: ${thumbnail ? thumbnail.length + ' chars' : 'none'})`)
+      return
+    }
+
+    console.log(`[MESH] Unhandled binary message type: ${header.type}`)
+  } catch (err) {
+    console.error('[MESH] Binary message parse error:', err.message)
+  }
+}
+
 function handleConnection(ws, req, serverState) {
   ws._remote_ip = req.socket.remoteAddress
-  ws.on('message', (data) => handleMessage(data, ws, serverState))
+  ws.on('message', (data, isBinary) => handleMessage(data, isBinary, ws, serverState))
   ws.on('close', () => handleClose(ws, serverState))
 }
 
@@ -288,7 +441,7 @@ function startHost({ name, port, password = '', headless_relay = false, room_cod
   // Pre-load persisted history if this channel was previously used
   const history = loadHistory(code)
 
-  const wss = new WebSocketServer({ port })
+  const wss = new WebSocketServer({ port, maxPayload: 50 * 1024 * 1024 })
 
   // ServerState: NetworkNode fields + per-server peer registries
   // Derived from state-models.md
@@ -316,7 +469,12 @@ function startHost({ name, port, password = '', headless_relay = false, room_cod
   }
 
   console.log(`[MESH] Server started on port ${port} (code: ${code})`)
-  return { code, history, ws_url: `ws://localhost:${port}` }
+  return {
+    code,
+    history: history.slice(-DEFAULTS.PAGE_SIZE),
+    has_more: history.length > DEFAULTS.PAGE_SIZE,
+    ws_url: `ws://localhost:${port}`,
+  }
 }
 
 /**
@@ -387,7 +545,8 @@ function reenterRoom(port) {
   if (!serverState) throw new Error('SERVER_NOT_FOUND')
   return {
     code:    serverState.room_code,
-    history: serverState.history,
+    history: serverState.history.slice(-DEFAULTS.PAGE_SIZE),
+    has_more: serverState.history.length > DEFAULTS.PAGE_SIZE,
     ws_url:  `ws://localhost:${port}`,
   }
 }
