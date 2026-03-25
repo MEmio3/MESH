@@ -40,6 +40,13 @@ const MSG_TYPES = {
   GUEST_RELAY_JOIN: 'guest_relay_join',
   DIRECT_MESSAGE: 'direct_message',
   DM_ERROR: 'dm_error',
+
+  // WebRTC signaling
+  WEBRTC_OFFER: 'webrtc_offer',
+  WEBRTC_ANSWER: 'webrtc_answer',
+  WEBRTC_ICE: 'webrtc_ice',
+  WEBRTC_HANGUP: 'webrtc_hangup',
+  WEBRTC_ERROR: 'webrtc_error',
 }
 
 const DEFAULTS = {
