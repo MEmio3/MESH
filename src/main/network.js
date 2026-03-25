@@ -374,6 +374,30 @@ function handleMessage(data, isBinary, ws, serverState) {
     return
   }
 
+  // --- WebRTC Signaling Router (Phase 2) ---
+  // webrtc-schemas.md: pure router — inject from_uid, forward to target, never parse sdp/candidate
+  if (
+    payload.type === MSG_TYPES.WEBRTC_OFFER ||
+    payload.type === MSG_TYPES.WEBRTC_ANSWER ||
+    payload.type === MSG_TYPES.WEBRTC_ICE ||
+    payload.type === MSG_TYPES.WEBRTC_HANGUP
+  ) {
+    const senderUid = ws._mesh_uid
+    const targetPeer =
+      serverState.connected_peers.get(payload.target_uid) ??
+      serverState.guest_peers.get(payload.target_uid)
+
+    if (!targetPeer) {
+      send(ws, { type: MSG_TYPES.WEBRTC_ERROR, reason: 'peer_offline', target_uid: payload.target_uid })
+      console.log(`[MESH] WebRTC ${payload.type} failed — target offline: ${payload.target_uid}`)
+      return
+    }
+
+    send(targetPeer.ws, { ...payload, from_uid: senderUid })
+    console.log(`[MESH] WebRTC ${payload.type} routed: ${senderUid} → ${payload.target_uid}`)
+    return
+  }
+
   console.log(`[MESH] Unhandled message type: ${payload.type}`)
 }
 
